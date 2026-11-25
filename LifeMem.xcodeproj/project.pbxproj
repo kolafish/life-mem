@@ -1,0 +1,189 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA0000000000000000000011 /* LifeMemApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000001 /* LifeMemApp.swift */; };
+		AA0000000000000000000012 /* Routes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000002 /* Routes.swift */; };
+		AA0000000000000000000013 /* RouteRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* RouteRecorder.swift */; };
+		AA0000000000000000000014 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* RecordView.swift */; };
+		AA0000000000000000000015 /* RouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* RouteViews.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000000000000000000001 /* LifeMemApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeMemApp.swift; sourceTree = "<group>"; };
+		AA0000000000000000000002 /* Routes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Routes.swift; sourceTree = "<group>"; };
+		AA0000000000000000000003 /* RouteRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteRecorder.swift; sourceTree = "<group>"; };
+		AA0000000000000000000004 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000005 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
+		AA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000000000000000000007 /* LifeMem.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = LifeMem.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		AA0000000000000000000021 = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000022 /* LifeMem */,
+				AA0000000000000000000023 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000022 /* LifeMem */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000001 /* LifeMemApp.swift */,
+				AA0000000000000000000002 /* Routes.swift */,
+				AA0000000000000000000003 /* RouteRecorder.swift */,
+				AA0000000000000000000004 /* RecordView.swift */,
+				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000006 /* Info.plist */,
+			);
+			path = LifeMem;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000023 /* Products */ = {
+			isa = PBXGroup;
+			children = (AA0000000000000000000007 /* LifeMem.app */);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0000000000000000000031 /* LifeMem */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000052 /* Target configurations */;
+			buildPhases = (AA0000000000000000000041 /* Sources */);
+			buildRules = ();
+			dependencies = ();
+			name = LifeMem;
+			productName = LifeMem;
+			productReference = AA0000000000000000000007 /* LifeMem.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000032 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2720;
+				LastUpgradeCheck = 2720;
+				TargetAttributes = {
+					AA0000000000000000000031 = {CreatedOnToolsVersion = 27.2; };
+				};
+			};
+			buildConfigurationList = AA0000000000000000000051 /* Project configurations */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = AA0000000000000000000021;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA0000000000000000000023 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (AA0000000000000000000031 /* LifeMem */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA0000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000011 /* LifeMemApp.swift in Sources */,
+				AA0000000000000000000012 /* Routes.swift in Sources */,
+				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
+				AA0000000000000000000014 /* RecordView.swift in Sources */,
+				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000061 /* Project Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000062 /* Project Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		AA0000000000000000000063 /* Target Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeMem/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kolafish.lifemem;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000064 /* Target Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeMem/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kolafish.lifemem;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA0000000000000000000051 /* Project configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (AA0000000000000000000061 /* Project Debug */, AA0000000000000000000062 /* Project Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000052 /* Target configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (AA0000000000000000000063 /* Target Debug */, AA0000000000000000000064 /* Target Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AA0000000000000000000032 /* Project object */;
+}
