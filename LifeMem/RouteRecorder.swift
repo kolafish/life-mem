@@ -22,7 +22,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
     private let motionManager = CMMotionActivityManager()
     private var recordingStartedAt: Date?
-    private var lastPoint: CLLocation?
+    private var lastPoint: (location: CLLocation, mode: TravelMode)?
     private var sensorMode: TravelMode = .unknown
     private var speedCandidate: TravelMode = .unknown
     private var speedObservations = 0
@@ -97,17 +97,17 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         for location in locations where location.timestamp >= recordingStartedAt && location.timestamp <= latestAllowed {
             guard CLLocationCoordinate2DIsValid(location.coordinate),
                   (0...65).contains(location.horizontalAccuracy) else { continue }
-            if let lastPoint, location.timestamp <= lastPoint.timestamp { continue }
+            if let lastPoint, location.timestamp <= lastPoint.location.timestamp { continue }
             updateMode(from: location)
             let sampling = LocationSampling(mode: mode)
-            guard let step = sampling.assess(location, after: lastPoint, mode: mode) else { continue }
+            guard let step = sampling.assess(location, after: lastPoint?.location, mode: mode, previousMode: lastPoint?.mode) else { continue }
             let point = RoutePoint(location: location, mode: mode, startsNewSegment: step.startsNewSegment, route: route)
             context.insert(point)
             route.pointCount += 1
             route.distanceMeters += step.distance
             do {
                 try context.save()
-                lastPoint = location
+                lastPoint = (location, mode)
                 locationUnavailable = false
             } catch {
                 context.rollback()
@@ -122,7 +122,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         guard state == .recording else { return }
         if (error as? CLError)?.code == .denied {
             pause()
-            notice = "定位权限已关闭。已保存的路线可以在「路线」中回看。"
+            notice = "定位权限已关闭。已保存的路线可以在「回顾」中查看。"
         } else {
             locationUnavailable = true
         }
