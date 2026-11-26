@@ -4,6 +4,7 @@ import SwiftUI
 
 struct RouteHistoryView: View {
     @Environment(\.calendar) private var calendar
+    @Environment(RoutePlaceNames.self) private var placeNames
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
 
@@ -69,13 +70,16 @@ struct RouteHistoryView: View {
             ContentUnavailableView("暂无停留地点", systemImage: "mappin.circle", description: Text("记录到持续停留后，可以在这里回看历次到访。"))
         } else {
             List(review.places) { place in
+                let name = placeNames.name(for: place.coordinate)
+                let visitCount = "\(place.visits.count) 次到访"
+                let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
                 NavigationLink {
                     RoutePlaceReviewView(place: place, days: review.days)
                 } label: {
                     Label {
                         ReviewTextRow(
-                            title: "\(place.visits.count) 次到访",
-                            detail: "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
+                            title: name ?? visitCount,
+                            detail: name == nil ? lastVisit : "\(visitCount) · \(lastVisit)"
                         )
                     } icon: {
                         Image(systemName: "mappin.circle.fill").foregroundStyle(.indigo)
@@ -97,7 +101,7 @@ struct RouteHistoryView: View {
                         } label: {
                             ReviewTextRow(
                                 title: day.date.formatted(.dateTime.month().day().weekday(.wide)),
-                                detail: day.summary
+                                detail: daySummary(day)
                             )
                         }
                     }
@@ -107,6 +111,11 @@ struct RouteHistoryView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private func daySummary(_ day: RouteReviewDay) -> String {
+        let name = day.entries.lazy.compactMap(\.visitCoordinate).compactMap { placeNames.name(for: $0) }.first
+        return name.map { "\(day.summary) · \($0)" } ?? day.summary
     }
 
     private struct ReviewModePicker: View {
@@ -139,7 +148,11 @@ private struct RoutePlaceReviewView: View {
     let place: RoutePlace
     let days: [RouteReviewDay]
 
+    @Environment(RoutePlaceNames.self) private var placeNames
+    @State private var namingTarget: PlaceNamingTarget?
+
     var body: some View {
+        let name = placeNames.name(for: place.coordinate)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
             Section {
@@ -147,12 +160,16 @@ private struct RoutePlaceReviewView: View {
                     initialPosition: .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 500, longitudinalMeters: 500)),
                     interactionModes: [.pan, .zoom]
                 ) {
-                    Marker("停留地点", coordinate: place.coordinate).tint(.indigo)
+                    Marker(name ?? "停留地点", coordinate: place.coordinate).tint(.indigo)
                 }
                 .mapStyle(.standard(emphasis: .muted))
                 .frame(height: 220)
                 .accessibilityLabel("停留地点地图")
                 .listRowInsets(EdgeInsets())
+                Button(name == nil ? "给地点命名" : "编辑地名") {
+                    namingTarget = PlaceNamingTarget(title: "停留地点", coordinate: place.coordinate)
+                }
+                .frame(minHeight: 44, alignment: .leading)
             }
             Section("到访记录") {
                 ForEach(place.visits.reversed()) { visit in
@@ -170,14 +187,19 @@ private struct RoutePlaceReviewView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("停留地点")
+        .navigationTitle(name ?? "停留地点")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $namingTarget) { target in
+            PlaceNamingView(target: target, initialName: placeNames.name(for: target.coordinate))
+        }
     }
 }
 
 private struct RouteDayReviewView: View {
     let day: RouteReviewDay
+    @Environment(RoutePlaceNames.self) private var placeNames
     @State private var selectedID: RouteReviewEntry.ID?
+    @State private var namingTarget: PlaceNamingTarget?
 
     init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil) {
         self.day = day
@@ -190,19 +212,29 @@ private struct RouteDayReviewView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(selected.map { "\($0.title) · \(clockRange($0.startedAt, $0.endedAt))" } ?? "当天轨迹")
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(selected.map { title(for: $0) } ?? "当天轨迹")
+                                .font(.subheadline.weight(.semibold))
+                            if let selected {
+                                Text(clockRange(selected.startedAt, selected.endedAt))
+                                    .font(.footnote.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                         ReviewMap(entries: selected.map { [$0] } ?? day.entries, focused: selected != nil)
                             .frame(height: 220)
                     }
                     .listRowInsets(EdgeInsets())
                     .id("review-map")
                 } footer: {
-                    if selected != nil {
-                        Button("查看当天全部") { selectedID = nil }
-                            .frame(minHeight: 44)
+                    if let selected {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 16) { mapActions(for: selected) }
+                                .fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 0) { mapActions(for: selected) }
+                        }
                     }
                 }
 
@@ -239,6 +271,45 @@ private struct RouteDayReviewView: View {
         }
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $namingTarget) { target in
+            PlaceNamingView(target: target, initialName: placeNames.name(for: target.coordinate))
+        }
+    }
+
+    @ViewBuilder
+    private func mapActions(for entry: RouteReviewEntry) -> some View {
+        Button("查看当天全部") { selectedID = nil }
+            .frame(minHeight: 44)
+        if let endpoints = entry.endpoints {
+            Menu {
+                Button("起点地名") { namePlace("起点地名", at: endpoints.start) }
+                Button("终点地名") { namePlace("终点地名", at: endpoints.end) }
+            } label: {
+                Label("地名", systemImage: "tag")
+                    .frame(minHeight: 44)
+            }
+        } else if let coordinate = entry.visitCoordinate {
+            Button("编辑地名") { namePlace("停留地点", at: coordinate) }
+                .frame(minHeight: 44)
+        }
+    }
+
+    private func namePlace(_ title: String, at coordinate: CLLocationCoordinate2D) {
+        namingTarget = PlaceNamingTarget(title: title, coordinate: coordinate)
+    }
+
+    private func title(for entry: RouteReviewEntry) -> String {
+        if let endpoints = entry.endpoints {
+            let start = placeNames.name(for: endpoints.start)
+            let end = placeNames.name(for: endpoints.end)
+            if start != nil || end != nil {
+                return "\(start ?? "起点") → \(end ?? "终点")"
+            }
+        }
+        if let coordinate = entry.visitCoordinate, let name = placeNames.name(for: coordinate) {
+            return name
+        }
+        return entry.title
     }
 
     private func entryRow(_ entry: RouteReviewEntry, selected: Bool) -> some View {
@@ -247,7 +318,7 @@ private struct RouteDayReviewView: View {
                 .foregroundStyle(entry.kind == .visit ? Color.teal : .indigo)
                 .frame(width: 24)
                 .accessibilityHidden(true)
-            ReviewTextRow(title: entry.title, detail: entry.subtitle, time: clockRange(entry.startedAt, entry.endedAt))
+            ReviewTextRow(title: title(for: entry), detail: entry.subtitle, time: clockRange(entry.startedAt, entry.endedAt))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: selected ? "checkmark.circle.fill" : "scope")
                 .foregroundStyle(selected ? Color.indigo : .secondary)
@@ -358,6 +429,7 @@ private struct RouteArchiveView: View {
 private struct ReviewMap: View {
     let entries: [RouteReviewEntry]
     let focused: Bool
+    @Environment(RoutePlaceNames.self) private var placeNames
     @State private var position: MapCameraPosition = .automatic
 
     private struct Viewport: Equatable {
@@ -374,7 +446,7 @@ private struct ReviewMap: View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
             ForEach(entries) { entry in
                 if entry.kind == .visit {
-                    Marker("停留", systemImage: "mappin", coordinate: entry.segments[0].startCoordinate)
+                    Marker(entry.visitCoordinate.flatMap { placeNames.name(for: $0) } ?? "停留", systemImage: "mappin", coordinate: entry.segments[0].startCoordinate)
                         .tint(.teal)
                 } else {
                     ForEach(entry.segments) { segment in
@@ -405,11 +477,13 @@ private struct ReviewMap: View {
     private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
         let segments = entry.segments.filter { $0.mode != .stationary }
         if let start = segments.first?.startCoordinate, let end = segments.last?.coordinates.last {
+            let startName = entry.endpoints.flatMap { placeNames.name(for: $0.start) }
+            let endName = entry.endpoints.flatMap { placeNames.name(for: $0.end) }
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
-                Marker("起点和终点", systemImage: "flag.checkered", coordinate: start).tint(.indigo)
+                Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: start).tint(.indigo)
             } else {
-                Marker("起点", systemImage: "flag", coordinate: start).tint(.indigo)
-                Marker("终点", systemImage: "flag.checkered", coordinate: end).tint(.indigo)
+                Marker(startName ?? "起点", systemImage: "flag", coordinate: start).tint(.indigo)
+                Marker(endName ?? "终点", systemImage: "flag.checkered", coordinate: end).tint(.indigo)
             }
         }
         if let line = segments.max(by: { $0.coordinates.count < $1.coordinates.count })?.coordinates, line.count > 1 {

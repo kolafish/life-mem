@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import Observation
 import SwiftData
 
 @Model
@@ -65,6 +66,11 @@ struct RouteActivitySegment: Identifiable {
 struct RouteReviewEntry: Identifiable {
     enum Kind { case trip, visit, fragment }
 
+    struct Endpoints {
+        let start: CLLocationCoordinate2D
+        let end: CLLocationCoordinate2D
+    }
+
     var id: PersistentIdentifier { segments[0].id }
     var startedAt: Date { segments[0].startedAt }
     var endedAt: Date { segments[segments.count - 1].endedAt }
@@ -72,6 +78,8 @@ struct RouteReviewEntry: Identifiable {
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
+    let endpoints: Endpoints?
+    let visitCoordinate: CLLocationCoordinate2D?
 }
 
 struct RouteReviewDay: Identifiable {
@@ -114,7 +122,7 @@ struct RoutePlace: Identifiable {
 
 struct RouteReview {
     private static let minimumVisitDuration: TimeInterval = 5 * 60
-    private static let placeRadius: CLLocationDistance = 100
+    static let placeRadius: CLLocationDistance = 100
 
     let days: [RouteReviewDay]
     let places: [RoutePlace]
@@ -125,19 +133,30 @@ struct RouteReview {
         for route in routes {
             let points = route.points.sorted { $0.timestamp < $1.timestamp }
             for (index, run) in Self.continuousRuns(points).enumerated() {
-                for slice in Self.timelineSlices(run) {
+                let slices = Self.timelineSlices(run)
+                for (sliceIndex, slice) in slices.enumerated() {
                     let first = slice.points[slice.points.startIndex]
                     let firstDay = calendar.startOfDay(for: first.timestamp)
+                    let lastDay = calendar.startOfDay(for: slice.points[slice.points.endIndex - 1].timestamp)
                     let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
-                    if slice.isVisit {
-                        visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, coordinate: first.coordinate))
+                    if let visit = slice.visitCoordinate {
+                        visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, coordinate: visit))
                     }
                     for (day, points) in pointsByDay {
                         let segments = RouteActivitySegment.group(sortedPoints: points)
                         let hasMovement = segments.contains { $0.mode != .stationary && $0.coordinates.count > 1 }
-                        let kind: RouteReviewEntry.Kind = slice.isVisit ? .visit : (hasMovement ? .trip : .fragment)
+                        let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
                         let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
-                        entriesByDay[day, default: []].append(RouteReviewEntry(kind: kind, followsGap: followsGap, segments: segments))
+                        let previousVisit = day == firstDay && sliceIndex > 0 ? slices[sliceIndex - 1].visitCoordinate : nil
+                        let nextVisit = day == lastDay && sliceIndex + 1 < slices.count ? slices[sliceIndex + 1].visitCoordinate : nil
+                        let endpoints = kind == .trip ? Self.endpoints(in: segments, previousVisit: previousVisit, nextVisit: nextVisit) : nil
+                        entriesByDay[day, default: []].append(RouteReviewEntry(
+                            kind: kind,
+                            followsGap: followsGap,
+                            segments: segments,
+                            endpoints: endpoints,
+                            visitCoordinate: slice.visitCoordinate
+                        ))
                     }
                 }
             }
@@ -167,8 +186,13 @@ struct RouteReview {
         return runs
     }
 
-    private static func timelineSlices(_ run: ArraySlice<RoutePoint>) -> [(points: ArraySlice<RoutePoint>, isVisit: Bool)] {
-        var slices: [(points: ArraySlice<RoutePoint>, isVisit: Bool)] = []
+    private struct TimelineSlice {
+        let points: ArraySlice<RoutePoint>
+        var visitCoordinate: CLLocationCoordinate2D?
+    }
+
+    private static func timelineSlices(_ run: ArraySlice<RoutePoint>) -> [TimelineSlice] {
+        var slices: [TimelineSlice] = []
         var start = run.startIndex
         var index = start
         while let stationaryStart = run[index...].firstIndex(where: { $0.mode == .stationary }) {
@@ -178,15 +202,91 @@ struct RouteReview {
             if run[end - 1].timestamp.timeIntervalSince(first.timestamp) >= minimumVisitDuration {
                 let anchor = first.coordinate.location
                 if stationary.allSatisfy({ $0.coordinate.location.distance(from: anchor) <= placeRadius }) {
-                    if start < stationaryStart { slices.append((run[start..<stationaryStart], false)) }
-                    slices.append((stationary, true))
+                    if start < stationaryStart { slices.append(TimelineSlice(points: run[start..<stationaryStart])) }
+                    slices.append(TimelineSlice(points: stationary, visitCoordinate: first.coordinate))
                     start = end
                 }
             }
             index = end
         }
-        if start < run.endIndex { slices.append((run[start...], false)) }
+        if start < run.endIndex { slices.append(TimelineSlice(points: run[start...])) }
         return slices
+    }
+
+    private static func endpoints(
+        in segments: [RouteActivitySegment],
+        previousVisit: CLLocationCoordinate2D?,
+        nextVisit: CLLocationCoordinate2D?
+    ) -> RouteReviewEntry.Endpoints? {
+        let movement = segments.filter { $0.mode != .stationary }
+        guard let start = movement.first?.startCoordinate, let end = movement.last?.coordinates.last else { return nil }
+        return RouteReviewEntry.Endpoints(start: place(near: start, visit: previousVisit), end: place(near: end, visit: nextVisit))
+    }
+
+    private static func place(near endpoint: CLLocationCoordinate2D, visit: CLLocationCoordinate2D?) -> CLLocationCoordinate2D {
+        guard let visit, endpoint.location.distance(from: visit.location) <= placeRadius else { return endpoint }
+        return visit
+    }
+}
+
+@MainActor
+@Observable
+final class RoutePlaceNames {
+    private struct SavedName: Codable {
+        var name: String
+        let latitude: Double
+        let longitude: Double
+
+        var location: CLLocation { CLLocation(latitude: latitude, longitude: longitude) }
+    }
+
+    private let file: URL
+    private var names: [SavedName] = []
+    private let loadError: Error?
+
+    init(file: URL) {
+        self.file = file
+        do {
+            names = try JSONDecoder().decode([SavedName].self, from: Data(contentsOf: file))
+            loadError = nil
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            loadError = nil
+        } catch {
+            loadError = error
+        }
+    }
+
+    func name(for coordinate: CLLocationCoordinate2D) -> String? {
+        matchingIndex(for: coordinate).map { names[$0].name }
+    }
+
+    func save(_ name: String?, for coordinate: CLLocationCoordinate2D) throws {
+        if let loadError { throw loadError }
+        var updated = names
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let index = matchingIndex(for: coordinate) {
+            if trimmed.isEmpty {
+                updated.remove(at: index)
+            } else {
+                updated[index].name = trimmed
+            }
+        } else if !trimmed.isEmpty {
+            updated.append(SavedName(name: trimmed, latitude: coordinate.latitude, longitude: coordinate.longitude))
+        } else {
+            return
+        }
+        let data = try JSONEncoder().encode(updated)
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        names = updated
+    }
+
+    private func matchingIndex(for coordinate: CLLocationCoordinate2D) -> Int? {
+        let location = coordinate.location
+        let nearest = names.indices.lazy
+            .map { (index: $0, distance: self.names[$0].location.distance(from: location)) }
+            .min { $0.distance < $1.distance }
+        guard let nearest, nearest.distance <= RouteReview.placeRadius else { return nil }
+        return nearest.index
     }
 }
 

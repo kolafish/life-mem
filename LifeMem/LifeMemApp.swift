@@ -4,12 +4,14 @@ import SwiftUI
 
 @main
 struct LifeMemApp: App {
+    private static let storageDirectory = URL.applicationSupportDirectory.appending(path: "LifeMem", directoryHint: .isDirectory)
     private let storage: Result<ModelContainer, Error>
+    @State private var placeNames = RoutePlaceNames(file: LifeMemApp.storageDirectory.appending(path: "place-names.json"))
 
     init() {
         storage = Result {
             let schema = Schema([RecordedRoute.self, RoutePoint.self])
-            var directory = URL.applicationSupportDirectory.appending(path: "LifeMem", directoryHint: .isDirectory)
+            var directory = Self.storageDirectory
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true,
@@ -35,6 +37,7 @@ struct LifeMemApp: App {
             case let .success(container):
                 RootView(context: container.mainContext)
                     .modelContainer(container)
+                    .environment(placeNames)
             case .failure:
                 ContentUnavailableView(
                     "暂时无法打开路线存储",
