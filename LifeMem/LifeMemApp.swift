@@ -63,7 +63,7 @@ private struct RootView: View {
             NavigationStack {
                 RouteHistoryView()
             }
-            .tabItem { Label("路线", systemImage: "map") }
+            .tabItem { Label("回顾", systemImage: "calendar") }
         }
         .tint(.indigo)
         .alert("Life Mem", isPresented: Binding(

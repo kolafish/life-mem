@@ -122,7 +122,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         guard state == .recording else { return }
         if (error as? CLError)?.code == .denied {
             pause()
-            notice = "定位权限已关闭。已保存的路线可以在「路线」中回看。"
+            notice = "定位权限已关闭。已保存的路线可以在「回顾」中查看。"
         } else {
             locationUnavailable = true
         }
