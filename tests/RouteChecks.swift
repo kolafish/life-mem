@@ -81,7 +81,8 @@ struct RouteChecks {
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
         try checkReview(context: context)
-        print("Passed sampling, persistence, deletion, activity segments, daily review, and visit grouping checks.")
+        try checkPlaceNames(in: root)
+        print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
     @MainActor
@@ -138,6 +139,12 @@ struct RouteChecks {
         precondition(today.map(\.kind) == [.trip, .visit, .trip, .trip, .trip, .fragment])
         precondition(today[0].segments.map(\.mode) == [.walking, .automotive, .unknown, .stationary, .automotive])
         precondition(today[1].endedAt.timeIntervalSince(today[1].startedAt) == 300)
+        precondition(today[0].endpoints?.start.longitude == 0)
+        precondition(today[0].endpoints?.end.longitude == destination)
+        precondition(today[1].visitCoordinate?.longitude == destination)
+        precondition(today[2].endpoints?.start.longitude == destination)
+        precondition(today[2].endpoints?.end.longitude == 0)
+        precondition(today[3].endpoints?.start.longitude == 0.03)
         precondition(today[2].segments.last?.coordinates.last?.longitude == 0)
         precondition(today[0].segments.first?.coordinates.first?.longitude == 0)
         precondition(today.filter(\.followsGap).map(\.startedAt) == [morning.addingTimeInterval(550), morning.addingTimeInterval(700)])
@@ -172,9 +179,45 @@ struct RouteChecks {
         precondition(beforeMidnight.map(\.kind) == [.visit, .trip])
         precondition(beforeMidnight[1].segments[0].coordinates.map(\.longitude) == [0.0, 0.0002])
         precondition(afterMidnight[1].segments[0].coordinates.map(\.longitude) == [0.0004, 0.0006])
+        precondition(beforeMidnight[1].endpoints?.end.longitude == 0.0002)
+        precondition(afterMidnight[1].endpoints?.start.longitude == 0.0004)
         precondition(afterMidnight[0].startedAt == nextDay)
         precondition(beforeMidnight[0].endedAt < nextDay)
         precondition(midnightReview.places[0].mostRecentVisit.id == beforeMidnight[0].id)
+    }
+
+    @MainActor
+    private static func checkPlaceNames(in directory: URL) throws {
+        let file = directory.appending(path: "place-names.json")
+        let start = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let nearby = CLLocationCoordinate2D(latitude: 0, longitude: 0.0002)
+        let end = CLLocationCoordinate2D(latitude: 0, longitude: 0.0100)
+        let names = RoutePlaceNames(file: file)
+        precondition(names.name(for: start) == nil)
+        try names.save(" 河滨公园 ", for: start)
+        try names.save("市图书馆", for: end)
+        precondition(names.name(for: nearby) == "河滨公园")
+
+        let reopened = RoutePlaceNames(file: file)
+        precondition(reopened.name(for: end) == "市图书馆")
+        try reopened.save("公园入口", for: nearby)
+        precondition(reopened.name(for: start) == "公园入口")
+        try reopened.save(nil, for: start)
+        let afterRemoval = RoutePlaceNames(file: file)
+        precondition(afterRemoval.name(for: nearby) == nil)
+        precondition(afterRemoval.name(for: end) == "市图书馆")
+
+        let invalidFile = directory.appending(path: "invalid-place-names.json")
+        let invalid = Data("incomplete".utf8)
+        try invalid.write(to: invalidFile)
+        let invalidStore = RoutePlaceNames(file: invalidFile)
+        do {
+            try invalidStore.save("测试名称", for: start)
+            preconditionFailure("Saving must not replace a place-name file that could not be loaded.")
+        } catch {
+            let persisted = try Data(contentsOf: invalidFile)
+            precondition(persisted == invalid)
+        }
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)

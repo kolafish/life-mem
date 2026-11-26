@@ -11,6 +11,7 @@
 		AA0000000000000000000013 /* RouteRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* RouteRecorder.swift */; };
 		AA0000000000000000000014 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* RecordView.swift */; };
 		AA0000000000000000000015 /* RouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* RouteViews.swift */; };
+		AA0000000000000000000018 /* PlaceNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* PlaceNamingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		AA0000000000000000000005 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
 		AA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0000000000000000000007 /* LifeMem.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = LifeMem.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000008 /* PlaceNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceNamingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -40,6 +42,7 @@
 				AA0000000000000000000003 /* RouteRecorder.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000008 /* PlaceNamingView.swift */,
 				AA0000000000000000000006 /* Info.plist */,
 			);
 			path = LifeMem;
@@ -100,6 +103,7 @@
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+				AA0000000000000000000018 /* PlaceNamingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
