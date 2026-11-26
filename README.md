@@ -2,6 +2,8 @@
 
 Life Mem 是一个 iPhone 路线记录工具。点「开始记录」，锁屏后可以继续采集。点「暂停记录」即停止采集，并可以回看路线。继续记录会开启新的一段，结束后可以从「路线」列表重新打开。路线点在采集时写入本机数据库，重新打开 App 后可以找回中断的记录。
 
+项目的代码职责、数据保护和变更验收约定见 [工程规范](AGENTS.md)。
+
 ## 在 iPhone 上测试
 
 1. 用 Xcode 打开 `LifeMem.xcodeproj`。在 **Signing & Capabilities** 为 `LifeMem` 目标选择自己的团队，并启用自动签名。需要时设置唯一的 Bundle ID。
@@ -29,10 +31,24 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ## 本地检查
 
-在装有 Xcode 的 Mac 上可以运行以下检查，覆盖自适应采样、路线分类、分段时间、地点分组、重开数据库后的持久性及删除行为。
+在装有完整 Xcode 的 Mac 上，从仓库根目录运行以下命令。如果当前开发者目录指向 Command Line Tools，可以先在当前终端运行 `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，并按实际安装位置调整路径。
+
+### 路线回归检查
+
+覆盖自适应采样、路线分类、分段时间、地点分组、重开数据库后的持久性及删除行为。
 
 ```sh
 mkdir -p DerivedData
 xcrun swiftc -parse-as-library LifeMem/Routes.swift tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
+```
+
+### 模拟器构建
+
+使用共享的 `LifeMem` scheme 检查 iOS App 能否编译。此命令无需启动模拟器或配置签名。
+
+```sh
+xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath DerivedData/simulator CODE_SIGNING_ALLOWED=NO build
 ```
