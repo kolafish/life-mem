@@ -24,8 +24,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private var recordingStartedAt: Date?
     private var lastPoint: (location: CLLocation, mode: TravelMode)?
     private var sensorMode: TravelMode = .unknown
-    private var speedCandidate: TravelMode = .unknown
-    private var speedObservations = 0
+    private var speedEstimate = SpeedModeEstimate()
     private var recordingID = UUID()
 
     init(context: ModelContext) {
@@ -167,8 +166,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         recordingID = UUID()
         lastPoint = nil
         sensorMode = .unknown
-        speedCandidate = .unknown
-        speedObservations = 0
+        speedEstimate = SpeedModeEstimate()
         mode = .unknown
         needsPreciseLocation = locationManager.accuracyAuthorization == .reducedAccuracy
         locationUnavailable = false
@@ -198,44 +196,28 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
 
     private func updateMotionActivity(_ activity: CMMotionActivity) {
         // Core Motion can report both automotive and stationary at a traffic light.
+        let detected: TravelMode
         if activity.automotive {
-            sensorMode = .automotive
+            detected = .automotive
         } else if activity.walking || activity.running {
-            sensorMode = .walking
+            detected = .walking
         } else if activity.cycling {
-            sensorMode = .cycling
+            detected = .cycling
         } else if activity.stationary {
-            sensorMode = .stationary
+            detected = .stationary
         } else {
-            sensorMode = .unknown
+            detected = .unknown
         }
-        speedCandidate = .unknown
-        speedObservations = 0
-        applyMode(sensorMode)
+        guard detected != sensorMode else { return }
+        sensorMode = detected
+        speedEstimate = SpeedModeEstimate()
+        mode = detected
+        configureLocation(for: detected)
     }
 
     private func updateMode(from location: CLLocation) {
         guard sensorMode == .unknown || sensorMode == .stationary,
-              location.speed >= 0, (0...3).contains(location.speedAccuracy),
-              location.horizontalAccuracy <= 35 else { return }
-        let candidate: TravelMode
-        switch location.speed {
-        case 7.5...: candidate = .automotive
-        case 0.7...2.8: candidate = .walking
-        default: candidate = .unknown
-        }
-        if candidate == speedCandidate {
-            speedObservations = min(speedObservations + 1, 2)
-        } else {
-            speedCandidate = candidate
-            speedObservations = 1
-        }
-        // Uncertain speed samples should not interrupt a previously recognized trip.
-        if candidate != .unknown, speedObservations >= 2 { applyMode(candidate) }
-    }
-
-    private func applyMode(_ newMode: TravelMode) {
-        guard mode != newMode else { return }
+              let newMode = speedEstimate.observe(location, currentMode: mode), newMode != mode else { return }
         mode = newMode
         configureLocation(for: newMode)
     }
@@ -243,7 +225,9 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private func configureLocation(for mode: TravelMode) {
         let sampling = LocationSampling(mode: mode)
         locationManager.desiredAccuracy = sampling.desiredAccuracy
-        locationManager.distanceFilter = sampling.distanceFilter
+        // Speed-based classification needs samples while slowing down or stopped.
+        locationManager.distanceFilter = sensorMode == .unknown || sensorMode == .stationary
+            ? kCLDistanceFilterNone : sampling.distanceFilter
         switch mode {
         case .automotive: locationManager.activityType = .automotiveNavigation
         case .walking, .cycling: locationManager.activityType = .fitness

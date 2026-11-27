@@ -34,6 +34,7 @@ struct RouteChecks {
         precondition(driving.assess(flyaway, after: first, mode: .automotive, previousMode: .stationary) == nil)
         let heartbeat = LocationSampling(mode: .unknown).assess(stayEnd, after: stayStart, mode: .unknown)
         precondition(heartbeat?.distance == 0 && heartbeat?.startsNewSegment == false)
+        checkSpeedEstimate(start: start)
 
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -836,6 +837,39 @@ struct RouteChecks {
             try context.save()
             lastPoint = location
         }
+    }
+
+    private static func checkSpeedEstimate(start: Date) {
+        let stationary = LocationSampling(mode: .stationary)
+        precondition(stationary.desiredAccuracy < stationary.maximumAccuracy)
+        precondition(stationary.assess(location(longitude: 0, at: start, accuracy: 65), after: nil, mode: .stationary) == nil)
+
+        func sample(_ seconds: TimeInterval, _ speed: Double, uncertainty: Double = 0.5) -> CLLocation {
+            CLLocation(coordinate: .init(latitude: 0, longitude: 0), altitude: 0, horizontalAccuracy: 5,
+                       verticalAccuracy: 5, course: -1, courseAccuracy: -1, speed: speed,
+                       speedAccuracy: uncertainty, timestamp: start.addingTimeInterval(seconds))
+        }
+
+        var estimate = SpeedModeEstimate()
+        precondition(estimate.observe(sample(0, 2.8), currentMode: .unknown) == nil)
+        precondition(estimate.observe(sample(1, 2.8), currentMode: .unknown) == .walking)
+        precondition(estimate.observe(sample(2, 4), currentMode: .walking) == nil)
+        precondition(estimate.observe(sample(10, 4, uncertainty: 2), currentMode: .walking) == nil)
+        precondition(estimate.observe(sample(11, 4), currentMode: .walking) == nil)
+        precondition(estimate.observe(sample(18, 4), currentMode: .walking) == nil)
+        precondition(estimate.observe(sample(19, 4), currentMode: .walking) == .cycling)
+        precondition(estimate.observe(sample(20, 7.5), currentMode: .cycling) == nil)
+        precondition(estimate.observe(sample(21, 7.5), currentMode: .cycling) == .automotive)
+        precondition(estimate.observe(sample(22, 4), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(31, 4), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(32, 0.3), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(38, 0.2), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(40, 8), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(41, 0.1), currentMode: .automotive) == nil)
+        precondition(estimate.observe(sample(53, 0.1), currentMode: .automotive) == .stationary)
+        precondition(estimate.observe(sample(150, 0.1), currentMode: .stationary) == nil)
+        precondition(estimate.observe(sample(151, 1.2), currentMode: .stationary) == nil)
+        precondition(estimate.observe(sample(152, 1.2), currentMode: .stationary) == .walking)
     }
 
     private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {
