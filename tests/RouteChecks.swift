@@ -520,6 +520,14 @@ struct RouteChecks {
         finish?.resume()
         let revokedPending = await automaticPending.value
         precondition(revokedPending == nil && clearing.cached(near: anotherUncached) == nil)
+
+        finish = nil
+        let cancelled = Task { await clearing.resolve(near: uncached, automatic: false) }
+        while finish == nil { await Task.yield() }
+        finish?.resume()
+        cancelled.cancel()
+        let cancelledResult = await cancelled.value
+        precondition(cancelledResult == nil && clearing.cached(near: uncached) == nil)
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)

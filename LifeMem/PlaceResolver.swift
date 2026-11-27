@@ -50,6 +50,18 @@ final class PlaceResolver {
         let automaticRevision: UUID?
         let location: CLLocation
         let names: RoutePlaceNames?
+        let cancellation: DemandCancellation
+    }
+
+    private final class DemandCancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+
+        var isCancelled: Bool { lock.withLock { cancelled } }
+
+        func cancel() {
+            lock.withLock { cancelled = true }
+        }
     }
 
     private enum LookupOutcome {
@@ -133,10 +145,12 @@ final class PlaceResolver {
 
     func resolve(near coordinate: CLLocationCoordinate2D, automatic: Bool, names: RoutePlaceNames? = nil) async -> MapPlaceSuggestion? {
         guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        let cancellation = DemandCancellation()
         let demand = Demand(
             automaticRevision: automatic ? automaticRevision : nil,
             location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
-            names: names
+            names: names,
+            cancellation: cancellation
         )
         let id = UUID()
         let revision = cacheRevision
@@ -162,6 +176,7 @@ final class PlaceResolver {
             }
             return nil
         } onCancel: {
+            cancellation.cancel()
             Task { @MainActor [weak self] in
                 self?.active?.demands.removeValue(forKey: id)
                 self?.cancelWithoutOriginDemand()
@@ -170,6 +185,7 @@ final class PlaceResolver {
     }
 
     private func isEligible(_ demand: Demand) -> Bool {
+        guard !demand.cancellation.isCancelled else { return false }
         guard let revision = demand.automaticRevision else { return true }
         return isAutomaticEnabled && revision == automaticRevision &&
             demand.names?.name(for: demand.location.coordinate) == nil
