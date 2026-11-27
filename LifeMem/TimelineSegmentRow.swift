@@ -1,0 +1,140 @@
+import CoreLocation
+import SwiftUI
+
+struct TimelineSegmentRow: View {
+    let entry: RouteReviewEntry
+    let selected: Bool
+    let select: () -> Void
+    let nameTarget: (PlaceNamingTarget) -> Void
+
+    @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
+
+    var body: some View {
+        let category = entry.visitCoordinate.flatMap { placeNames.category(for: $0) }
+        let moves = entry.moves
+        let color = category?.mapColor ?? (entry.kind == .visit ? .teal : moves.first?.mode.mapColor ?? .secondary)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                select()
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: category?.symbol ?? entry.symbol)
+                        .foregroundStyle(color)
+                        .frame(width: 29)
+                        .accessibilityHidden(true)
+                    ReviewTextRow(
+                        title: title(for: entry),
+                        detail: entry.stay.map { routeDuration($0.duration) } ?? moveDetail(moves),
+                        time: clockRange(entry.startedAt, entry.endedAt)
+                    )
+                    Spacer(minLength: 4)
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.indigo)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timeline-entry")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            if selected {
+                if moves.count > 1 {
+                    DisclosureGroup("移动片段") {
+                        ForEach(moves) { move in
+                            ReviewTextRow(
+                                title: move.mode.recordedTitle,
+                                detail: moveDetail([move]),
+                                time: clockRange(move.startedAt, move.endedAt)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .font(.subheadline)
+                    .padding(.vertical, 6)
+                }
+                namingAction(for: entry)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(selected ? Color.indigo.opacity(0.09) : Color(uiColor: .secondarySystemGroupedBackground),
+                    in: .rect(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func namingAction(for entry: RouteReviewEntry) -> some View {
+        if let endpoints = entry.endpoints {
+            Menu {
+                Button("起点地名") { namePlace("起点地名", at: endpoints.start) }
+                Button("终点地名") { namePlace("终点地名", at: endpoints.end) }
+            } label: {
+                Label("地名", systemImage: "tag").frame(minHeight: 44)
+            }
+        } else if let coordinate = entry.visitCoordinate {
+            Button {
+                namePlace("停留地点", at: coordinate)
+            } label: {
+                Label("编辑地名", systemImage: "tag").frame(minHeight: 44)
+            }
+        }
+    }
+
+    private func namePlace(_ title: String, at coordinate: CLLocationCoordinate2D) {
+        nameTarget(PlaceNamingTarget(title: title, coordinate: coordinate))
+    }
+
+    private func title(for entry: RouteReviewEntry) -> String {
+        if let coordinate = entry.visitCoordinate {
+            return placeResolver.label(near: coordinate, names: placeNames) ?? "停留地点"
+        }
+        if let endpoints = entry.endpoints {
+            let start = placeResolver.label(near: endpoints.start, names: placeNames)
+            let end = placeResolver.label(near: endpoints.end, names: placeNames)
+            if start != nil || end != nil { return "\(start ?? "起点") → \(end ?? "终点")" }
+        }
+        if let mode = entry.moves.first?.mode, entry.moves.allSatisfy({ $0.mode == mode }) {
+            return mode.recordedTitle
+        }
+        return entry.title
+    }
+
+    private func moveDetail(_ moves: [MoveEvent]) -> String? {
+        guard !moves.isEmpty else { return nil }
+        let meters = moves.reduce(0) { $0 + $1.distanceMeters }
+        let seconds = moves.reduce(0) { $0 + $1.duration }
+        let distance = routeDistance(meters)
+        let duration = routeDuration(seconds)
+        let speed = (meters / seconds * 3.6).formatted(.number.precision(.fractionLength(1)))
+        let modes = Set(moves.map(\.mode))
+        if modes.count == 1 { return "\(distance) · \(duration) · \(speed) 公里/小时" }
+        let modeNames = TravelMode.allCases.filter { modes.contains($0) }.map(\.recordedTitle).joined(separator: "、")
+        return "\(modeNames) · \(distance) · \(duration)"
+    }
+}
+
+private extension RouteReviewEntry {
+    private var modes: [TravelMode] {
+        [.walking, .cycling, .automotive].filter { mode in segments.contains { $0.mode == mode } }
+    }
+
+    var title: String {
+        switch kind {
+        case .trip: "行程"
+        case .visit: "停留"
+        case .fragment: "记录片段"
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case .trip: modes.count == 1 ? modes[0].symbol : "point.topleft.down.to.point.bottomright.curvepath"
+        case .visit: "mappin.circle.fill"
+        case .fragment: "location.circle"
+        }
+    }
+}

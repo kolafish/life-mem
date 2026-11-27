@@ -17,6 +17,11 @@
 		AA000000000000000000001C /* RouteBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000C /* RouteBehavior.swift */; };
 		AA000000000000000000001B /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000B /* AnalyticsView.swift */; };
 		AA0000000000000000000081 /* ReviewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* ReviewUITests.swift */; };
+		AA0000000000000000000400 /* DailySummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000300 /* DailySummaryCard.swift */; };
+		AA0000000000000000000401 /* RouteMapContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000301 /* RouteMapContainer.swift */; };
+		AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000302 /* TimelineSegmentRow.swift */; };
+		AA0000000000000000000403 /* DayPickerHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000303 /* DayPickerHeader.swift */; };
+		AA0000000000000000000404 /* RoutePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000304 /* RoutePresentation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +49,11 @@
 		AA000000000000000000000B /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000080 /* ReviewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = tests/ReviewUITests.swift; sourceTree = "<group>"; };
 		AA0000000000000000000082 /* LifeMemUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LifeMemUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000300 /* DailySummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummaryCard.swift; sourceTree = "<group>"; };
+		AA0000000000000000000301 /* RouteMapContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteMapContainer.swift; sourceTree = "<group>"; };
+		AA0000000000000000000302 /* TimelineSegmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSegmentRow.swift; sourceTree = "<group>"; };
+		AA0000000000000000000303 /* DayPickerHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPickerHeader.swift; sourceTree = "<group>"; };
+		AA0000000000000000000304 /* RoutePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePresentation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -64,6 +74,11 @@
 				AA0000000000000000000003 /* RouteRecorder.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000304 /* RoutePresentation.swift */,
+				AA0000000000000000000303 /* DayPickerHeader.swift */,
+				AA0000000000000000000302 /* TimelineSegmentRow.swift */,
+				AA0000000000000000000301 /* RouteMapContainer.swift */,
+				AA0000000000000000000300 /* DailySummaryCard.swift */,
 				AA0000000000000000000008 /* PlaceNamingView.swift */,
 				AA0000000000000000000009 /* PlaceResolver.swift */,
 				AA000000000000000000000A /* RouteAnalytics.swift */,
@@ -140,6 +155,11 @@
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+				AA0000000000000000000404 /* RoutePresentation.swift in Sources */,
+				AA0000000000000000000403 /* DayPickerHeader.swift in Sources */,
+				AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */,
+				AA0000000000000000000401 /* RouteMapContainer.swift in Sources */,
+				AA0000000000000000000400 /* DailySummaryCard.swift in Sources */,
 				AA0000000000000000000018 /* PlaceNamingView.swift in Sources */,
 				AA0000000000000000000019 /* PlaceResolver.swift in Sources */,
 				AA000000000000000000001A /* RouteAnalytics.swift in Sources */,
