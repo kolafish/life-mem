@@ -31,9 +31,13 @@ struct RouteMapProjection {
         coverage = coverageURL.flatMap { try? MainlandCoverage(contentsOf: $0) }
     }
 
-    // Apply the map datum only when placing content on the standard map.
+    func usesAMapCoordinate(for coordinate: CLLocationCoordinate2D) -> Bool {
+        coverage?.contains(coordinate) == true
+    }
+
+    // Convert raw route coordinates at the boundary with the map service.
     func coordinate(for coordinate: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
-        guard coverage?.contains(coordinate) == true else { return coordinate }
+        guard usesAMapCoordinate(for: coordinate) else { return coordinate }
         return Self.amapCoordinate(for: coordinate)
     }
 

@@ -90,6 +90,7 @@ final class PlaceResolver {
     private static let prefetchPreference = "prefetchPlaceNames"
     private static let introductionPreference = "dismissedAutomaticPlaceIntroduction"
     private static let cacheRadius: CLLocationDistance = 25
+    private static let mainlandLookupVersion = 1
 
     private enum AutomaticMode {
         case off, review, prefetch
@@ -112,6 +113,7 @@ final class PlaceResolver {
         let latitude: Double
         let longitude: Double
         let suggestion: MapPlaceSuggestion
+        let lookupVersion: Int?
 
         var location: CLLocation { CLLocation(latitude: latitude, longitude: longitude) }
     }
@@ -142,6 +144,7 @@ final class PlaceResolver {
     private struct ActiveLookup {
         let id: UUID
         let location: CLLocation
+        let lookupVersion: Int?
         let task: Task<LookupOutcome, Never>
         var demands: [UUID: Demand]
     }
@@ -149,6 +152,7 @@ final class PlaceResolver {
     private let file: URL
     private let defaults: UserDefaults
     private let lookup: Lookup
+    private let projection: RouteMapProjection
     private let clock = ContinuousClock()
     private let minimumInterval: Duration
     private let initialBackoff: Duration
@@ -171,12 +175,14 @@ final class PlaceResolver {
         defaults: UserDefaults = .standard,
         minimumInterval: Duration = .seconds(2),
         initialBackoff: Duration = .seconds(15),
+        projection: RouteMapProjection = .standard,
         lookup: Lookup? = nil
     ) {
         self.file = file
         self.defaults = defaults
         self.minimumInterval = minimumInterval
         self.initialBackoff = initialBackoff
+        self.projection = projection
         self.lookup = lookup ?? Self.systemLookup
         if defaults.bool(forKey: Self.automaticPreference) {
             automaticMode = defaults.bool(forKey: Self.prefetchPreference) ? .prefetch : .review
@@ -185,7 +191,10 @@ final class PlaceResolver {
         }
         hasSeenAutomaticIntroduction = defaults.bool(forKey: Self.introductionPreference)
         let data = try? Data(contentsOf: file)
-        entries = data.flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
+        let stored = data.flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
+        entries = stored.filter { entry in
+            entry.lookupVersion == Self.lookupVersion(for: entry.location.coordinate, projection: projection)
+        }
     }
 
     func dismissAutomaticIntroduction() {
@@ -217,8 +226,14 @@ final class PlaceResolver {
     }
 
     func cached(near coordinate: CLLocationCoordinate2D) -> MapPlaceSuggestion? {
+        guard !entries.isEmpty else { return nil }
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        let nearest = entries.lazy.map { (suggestion: $0.suggestion, distance: $0.location.distance(from: location)) }
+        return cached(near: location, lookupVersion: Self.lookupVersion(for: coordinate, projection: projection))
+    }
+
+    private func cached(near location: CLLocation, lookupVersion: Int?) -> MapPlaceSuggestion? {
+        let nearest = entries.lazy.filter { $0.lookupVersion == lookupVersion }
+            .map { (suggestion: $0.suggestion, distance: $0.location.distance(from: location)) }
             .min { $0.distance < $1.distance }
         guard let nearest, nearest.distance <= Self.cacheRadius else { return nil }
         return nearest.suggestion
@@ -261,6 +276,7 @@ final class PlaceResolver {
 
     func resolve(near coordinate: CLLocationCoordinate2D, automatic: Bool, names: RoutePlaceNames? = nil) async -> MapPlaceSuggestion? {
         guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        let lookupVersion = Self.lookupVersion(for: coordinate, projection: projection)
         let cancellation = DemandCancellation()
         let demand = Demand(
             automaticRevision: automatic ? automaticRevision : nil,
@@ -272,19 +288,20 @@ final class PlaceResolver {
         let revision = cacheRevision
         return await withTaskCancellationHandler {
             while !Task.isCancelled, revision == cacheRevision, isEligible(demand) {
-                if let cached = cached(near: coordinate) { return cached }
+                if let cached = cached(near: demand.location, lookupVersion: lookupVersion) { return cached }
                 if let retryAfter, clock.now < retryAfter { return nil }
                 let task: Task<LookupOutcome, Never>
                 if let active {
                     task = active.task
-                    guard !task.isCancelled, active.location.distance(from: demand.location) <= Self.cacheRadius else {
+                    guard !task.isCancelled, active.lookupVersion == lookupVersion,
+                          active.location.distance(from: demand.location) <= Self.cacheRadius else {
                         _ = await task.value
                         continue
                     }
                     self.active?.demands[id] = demand
                 } else {
-                    task = Task { await performLookup(id: id, coordinate: coordinate) }
-                    active = ActiveLookup(id: id, location: demand.location, task: task, demands: [id: demand])
+                    task = Task { await performLookup(id: id, coordinate: coordinate, lookupVersion: lookupVersion) }
+                    active = ActiveLookup(id: id, location: demand.location, lookupVersion: lookupVersion, task: task, demands: [id: demand])
                 }
                 if case let .completed(result) = await task.value {
                     return !Task.isCancelled && revision == cacheRevision && isEligible(demand) ? result : nil
@@ -323,7 +340,7 @@ final class PlaceResolver {
         if let active, !hasEligibleDemand(active) { active.task.cancel() }
     }
 
-    private func performLookup(id: UUID, coordinate: CLLocationCoordinate2D) async -> LookupOutcome {
+    private func performLookup(id: UUID, coordinate: CLLocationCoordinate2D, lookupVersion: Int?) async -> LookupOutcome {
         defer { active = nil }
         if let nextStart, clock.now < nextStart {
             do {
@@ -336,7 +353,9 @@ final class PlaceResolver {
         nextStart = clock.now.advanced(by: minimumInterval)
         let result: LookupResponse
         do {
-            result = try await lookup(coordinate) {
+            // Cache and match demand in route coordinates, even when the map service uses another datum.
+            let mapCoordinate = projection.coordinate(for: coordinate)
+            result = try await lookup(mapCoordinate) {
                 // A new network request at the original coordinate still needs an eligible caller there.
                 guard !Task.isCancelled, let current = self.active, current.id == id, self.hasOriginDemand(current) else {
                     throw CancellationError()
@@ -357,11 +376,16 @@ final class PlaceResolver {
             retryAfter = nil
         }
         guard let suggestion = result.suggestion, !suggestion.candidates.isEmpty else { return .completed(nil) }
-        entries.append(Entry(latitude: coordinate.latitude, longitude: coordinate.longitude, suggestion: suggestion))
+        entries.append(Entry(latitude: coordinate.latitude, longitude: coordinate.longitude,
+                             suggestion: suggestion, lookupVersion: lookupVersion))
         if let data = try? JSONEncoder().encode(entries) {
             try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
         return .completed(suggestion)
+    }
+
+    private static func lookupVersion(for coordinate: CLLocationCoordinate2D, projection: RouteMapProjection) -> Int? {
+        projection.usesAMapCoordinate(for: coordinate) ? mainlandLookupVersion : nil
     }
 
     private func backOff() {
@@ -381,7 +405,8 @@ final class PlaceResolver {
             items = try await MKLocalSearch(request: request).start().mapItems
         } catch let error as MKError where error.code == .loadingThrottled {
             throw error
-        } catch let error as MKError where error.code == .placemarkNotFound {
+        } catch let error as MKError where error.code == .placemarkNotFound || error.code == .directionsNotFound {
+            // Regional POI searches can also return directionsNotFound while address lookup succeeds.
             items = []
         } catch {
             items = []
