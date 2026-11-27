@@ -34,6 +34,10 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 轨迹数据库保存在 App 的本机目录，禁用自动云同步和云备份。地图回看由 Apple MapKit 提供。可在「回顾」右上角打开「管理记录」，向左滑动删除一条已结束的原始记录及其各日轨迹。
 
+## 分析
+
+「分析」支持本周、本月和自定义日期。时间分配按已记录的移动和停留统计。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。
+
 ## 本地检查
 
 在装有完整 Xcode 的 Mac 上，从仓库根目录运行以下命令。如果当前开发者目录指向 Command Line Tools，可以先在当前终端运行 `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，并按实际安装位置调整路径。
@@ -44,7 +48,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ```sh
 mkdir -p DerivedData
-xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift tests/RouteChecks.swift -o DerivedData/route-checks
+xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift LifeMem/RouteAnalytics.swift tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```
 

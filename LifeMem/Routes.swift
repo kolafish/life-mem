@@ -97,7 +97,7 @@ struct RouteActivitySegment: Identifiable {
         return segments
     }
 
-    private static func measuredDistance(from first: RoutePoint, to second: RoutePoint) -> CLLocationDistance {
+    fileprivate static func measuredDistance(from first: RoutePoint, to second: RoutePoint) -> CLLocationDistance {
         let meters = first.coordinate.location.distance(from: second.coordinate.location)
         let noise = (first.accuracy + second.accuracy) * 0.35
         return meters >= noise ? meters : 0
@@ -136,16 +136,22 @@ struct RouteReviewEntry: Identifiable {
 }
 
 struct RouteReviewDay: Identifiable {
+    struct Movement {
+        var duration: TimeInterval = 0
+        var distance: CLLocationDistance = 0
+    }
+
     var id: Date { date }
 
     let date: Date
     let entries: [RouteReviewEntry]
+    private(set) var midnightMovement = Movement()
 
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
     var stays: [StayEvent] { entries.compactMap(\.stay) }
     var moves: [MoveEvent] { entries.flatMap(\.moves) }
-    var movingDistanceMeters: CLLocationDistance { moves.reduce(0) { $0 + $1.distanceMeters } }
-    var movingDuration: TimeInterval { moves.reduce(0) { $0 + $1.duration } }
+    var movingDistanceMeters: CLLocationDistance { moves.reduce(midnightMovement.distance) { $0 + $1.distanceMeters } }
+    var movingDuration: TimeInterval { moves.reduce(midnightMovement.duration) { $0 + $1.duration } }
 }
 
 enum TimelineSegment: Identifiable {
@@ -215,6 +221,21 @@ struct RoutePlace: Identifiable {
     }
 }
 
+struct RouteReviewRevision: Hashable {
+    private struct RouteVersion: Hashable {
+        let id: UUID
+        let pointCount: Int
+    }
+
+    let calendar: Calendar
+    private let routes: [RouteVersion]
+
+    init(calendar: Calendar, routes: [RecordedRoute]) {
+        self.calendar = calendar
+        self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount) }
+    }
+}
+
 struct RouteReview {
     private static let minimumVisitDuration: TimeInterval = 8 * 60
     private static let stayRadius: CLLocationDistance = 60
@@ -225,6 +246,7 @@ struct RouteReview {
 
     init(routes: [RecordedRoute], calendar: Calendar) {
         var entriesByDay: [Date: [RouteReviewEntry]] = [:]
+        var midnightMovement: [Date: RouteReviewDay.Movement] = [:]
         var visits: [RouteVisit] = []
         for route in routes {
             let points = route.points.sorted { $0.timestamp < $1.timestamp }
@@ -236,15 +258,28 @@ struct RouteReview {
                     let lastDay = calendar.startOfDay(for: slice.points[slice.points.endIndex - 1].timestamp)
                     let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
                     let last = slice.points[slice.points.endIndex - 1]
+                    let previousSlice = sliceIndex > 0 ? slices[sliceIndex - 1] : nil
+                    let nextSlice = sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
                     if let visit = slice.visitCoordinate {
                         visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
+                    } else {
+                        if firstDay != lastDay {
+                            for (from, to) in zip(slice.points, slice.points.dropFirst())
+                                where from.mode != .stationary && to.mode != .stationary && !to.startsNewSegment {
+                                Self.allocateMidnightEdge(from: from, to: to, calendar: calendar, totals: &midnightMovement)
+                            }
+                        }
+                        if previousSlice?.visitCoordinate != nil, let from = previousSlice?.points.last, first.mode != .stationary {
+                            Self.allocateMidnightEdge(from: from, to: first, calendar: calendar, totals: &midnightMovement)
+                        }
+                        if nextSlice?.visitCoordinate != nil, let to = nextSlice?.points.first, last.mode != .stationary {
+                            Self.allocateMidnightEdge(from: last, to: to, calendar: calendar, totals: &midnightMovement)
+                        }
                     }
                     for (day, points) in pointsByDay {
                         let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
-                        let previousSlice = day == firstDay && sliceIndex > 0 ? slices[sliceIndex - 1] : nil
-                        let nextSlice = day == lastDay && sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
-                        let previousVisit = previousSlice?.visitCoordinate
-                        let nextVisit = nextSlice?.visitCoordinate
+                        let previousVisit = day == firstDay ? previousSlice?.visitCoordinate : nil
+                        let nextVisit = day == lastDay ? nextSlice?.visitCoordinate : nil
                         let leading = slice.visitCoordinate == nil && previousVisit != nil ? previousSlice?.points.last : nil
                         let trailing = slice.visitCoordinate == nil && nextVisit != nil ? nextSlice?.points.first : nil
                         let segments = RouteActivitySegment.group(
@@ -278,9 +313,32 @@ struct RouteReview {
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
-            RouteReviewDay(date: date, entries: entriesByDay[date, default: []].sorted { $0.startedAt < $1.startedAt })
+            RouteReviewDay(
+                date: date,
+                entries: entriesByDay[date, default: []].sorted { $0.startedAt < $1.startedAt },
+                midnightMovement: midnightMovement[date, default: .init()]
+            )
         }
         places = RoutePlace.group(visits, within: Self.placeRadius)
+    }
+
+    private static func allocateMidnightEdge(
+        from first: RoutePoint,
+        to second: RoutePoint,
+        calendar: Calendar,
+        totals: inout [Date: RouteReviewDay.Movement]
+    ) {
+        let startDay = calendar.startOfDay(for: first.timestamp)
+        let endDay = calendar.startOfDay(for: second.timestamp)
+        guard startDay != endDay else { return }
+        let distance = RouteActivitySegment.measuredDistance(from: first, to: second)
+        guard distance > 0 else { return }
+        let seconds = second.timestamp.timeIntervalSince(first.timestamp)
+        let before = endDay.timeIntervalSince(first.timestamp)
+        totals[startDay, default: .init()].duration += before
+        totals[startDay, default: .init()].distance += distance * before / seconds
+        totals[endDay, default: .init()].duration += seconds - before
+        totals[endDay, default: .init()].distance += distance * (seconds - before) / seconds
     }
 
     private static func cleanRuns(_ points: [RoutePoint]) -> [[RoutePoint]] {
