@@ -231,7 +231,7 @@ private struct RoutePlaceReviewView: View {
                 ForEach(place.visits.reversed()) { visit in
                     if let day = daysByDate[visit.date] {
                         NavigationLink {
-                            RouteDayReviewView(day: day, focus: visit.id)
+                            RouteDayReviewView(day: day, focus: visit.id, allowsAutomaticLookup: suggestedCategory == nil)
                         } label: {
                             ReviewTextRow(
                                 title: visit.startedAt.formatted(.dateTime.year().month().day().weekday(.abbreviated)),
@@ -269,6 +269,7 @@ private struct RouteDayReviewView: View {
     @State private var selection: Selection
     @State private var namingTarget: PlaceNamingTarget?
     private let initialFocus: RouteReviewEntry.ID?
+    private let allowsAutomaticLookup: Bool
 
     private struct Selection {
         var id: RouteReviewEntry.ID?
@@ -280,9 +281,10 @@ private struct RouteDayReviewView: View {
         }
     }
 
-    init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil) {
+    init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil, allowsAutomaticLookup: Bool = true) {
         self.day = day
         initialFocus = focus
+        self.allowsAutomaticLookup = allowsAutomaticLookup
         _selection = State(initialValue: Selection(id: focus))
     }
 
@@ -342,8 +344,8 @@ private struct RouteDayReviewView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: placeResolver.isAutomaticEnabled && namingTarget == nil) {
-            guard placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
+        .task(id: allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil) {
+            guard allowsAutomaticLookup, placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
             for coordinate in day.entries.compactMap(\.visitCoordinate) {
                 guard !Task.isCancelled else { return }
                 await placeResolver.resolveAutomatically(near: coordinate, names: placeNames)
