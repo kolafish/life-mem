@@ -351,6 +351,34 @@ struct RouteChecks {
 
         let sparse = RouteBehavior(review: review, range: firstDay...firstDay, calendar: calendar) { _ in nil }
         precondition(sparse.patterns.isEmpty && sparse.routine.isEmpty)
+
+        let midnight = firstDay.addingTimeInterval(86_400)
+        let otherMidnight = midnight.addingTimeInterval(86_400)
+        let acrossMidnight: [Sample] = [
+            (0, 0.03, .automotive, true), (40, 0.031, .automotive, false),
+            (60, 0.032, .automotive, false), (100, 0.033, .automotive, false)
+        ]
+        let repeatedOvernight = [midnight, otherMidnight].map {
+            insertRoute(context: context, start: $0.addingTimeInterval(-50), samples: acrossMidnight)
+        }
+        let midnightDeparture = insertRoute(
+            context: context, start: midnight.addingTimeInterval(-490),
+            samples: stop(start: 0, longitude: 0) + [(500, 0.0004, .walking, true), (520, 0.0006, .walking, false)]
+        )
+        let midnightArrival = insertRoute(
+            context: context, start: midnight.addingTimeInterval(-40),
+            samples: [(0, 0.001, .walking, true), (30, 0.0004, .walking, false)] + stop(start: 50, longitude: 0)
+        )
+        try context.save()
+        let overnightReview = RouteReview(routes: repeatedOvernight + [midnightDeparture, midnightArrival], calendar: calendar)
+        let overnightEfficiency = RouteBehavior(review: overnightReview, range: firstDay...otherMidnight, calendar: calendar) { _ in nil }
+        precondition(overnightEfficiency.patterns.count == 1)
+        precondition(overnightEfficiency.patterns[0].samples.map(\.duration) == [100, 100])
+        let overnightRoutine = RouteBehavior(review: overnightReview, range: midnight...midnight, calendar: calendar) {
+            abs($0.longitude) < 0.0001 ? .home : nil
+        }
+        precondition(Set(overnightRoutine.routine.map(\.kind)) == [.departure, .arrival])
+        precondition(overnightRoutine.routine.allSatisfy { $0.day == midnight && $0.time == midnight.addingTimeInterval(10) })
     }
 
     @MainActor
