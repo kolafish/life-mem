@@ -33,23 +33,7 @@ struct LifeMemApp: App {
             defaults: preferences
         ))
         storage = Result {
-            let schema = Schema([RecordedRoute.self, RoutePoint.self])
-            var directory = Self.storageDirectory
-            try FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-            )
-            var resources = URLResourceValues()
-            resources.isExcludedFromBackup = true
-            try directory.setResourceValues(resources)
-            let configuration = ModelConfiguration(
-                schema: schema,
-                url: directory.appending(path: "routes.store"),
-                cloudKitDatabase: .none
-            )
-            let container = try ModelContainer(for: schema, configurations: [configuration])
-            container.mainContext.autosaveEnabled = false
+            let container = try RouteStore.open(directory: Self.storageDirectory)
             #if DEBUG && targetEnvironment(simulator)
             try ReviewTestFixture.seed(context: container.mainContext, names: names)
             #endif
