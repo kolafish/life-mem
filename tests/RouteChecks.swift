@@ -329,6 +329,16 @@ struct RouteChecks {
         calendar.timeZone = TimeZone(secondsFromGMT: -8 * 3_600)!
         let shifted = cache.review(routes: [stay], calendar: calendar)
         precondition(shifted.days[0].date == calendar.startOfDay(for: stay.startedAt) && shifted.days[0].date != nextDate)
+
+        let previousDefault = NSTimeZone.default
+        defer { NSTimeZone.default = previousDefault }
+        let automatic = Calendar.autoupdatingCurrent
+        NSTimeZone.default = TimeZone(identifier: "Asia/Shanghai")!
+        let beforeChange = cache.review(routes: [stay], calendar: automatic)
+        NSTimeZone.default = TimeZone(identifier: "Pacific/Honolulu")!
+        let afterChange = cache.review(routes: [stay], calendar: automatic)
+        precondition(afterChange.days[0].date == automatic.startOfDay(for: stay.startedAt))
+        precondition(beforeChange.days[0].date != afterChange.days[0].date)
     }
 
     @MainActor

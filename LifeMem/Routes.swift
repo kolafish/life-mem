@@ -246,7 +246,13 @@ struct RouteReviewRevision: Hashable {
     fileprivate let routes: [RouteVersion]
 
     init(calendar: Calendar, routes: [RecordedRoute]) {
-        self.calendar = calendar
+        // Freeze the effective settings before storing a key built from an autoupdating calendar.
+        var resolved = Calendar(identifier: calendar.identifier)
+        resolved.locale = calendar.locale.map { Locale(identifier: $0.identifier) }
+        resolved.timeZone = TimeZone(identifier: calendar.timeZone.identifier) ?? calendar.timeZone
+        resolved.firstWeekday = calendar.firstWeekday
+        resolved.minimumDaysInFirstWeek = calendar.minimumDaysInFirstWeek
+        self.calendar = resolved
         self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount) }
     }
 }
@@ -260,11 +266,11 @@ final class RouteReviewCache {
     func review(routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
         let current = RouteReviewRevision(calendar: calendar, routes: routes)
         if revision == current, let snapshot { return snapshot }
-        if revision?.calendar != calendar { contributions.removeAll() }
+        if revision?.calendar != current.calendar { contributions.removeAll() }
 
         var retained: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
         let ordered = zip(routes, current.routes).map { route, version in
-            let value = contributions[version] ?? RouteReview.contribution(for: route, calendar: calendar)
+            let value = contributions[version] ?? RouteReview.contribution(for: route, calendar: current.calendar)
             retained[version] = value
             return value
         }
