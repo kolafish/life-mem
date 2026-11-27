@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import SwiftData
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct AnalyticsView: View {
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var now = Date.now
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
@@ -32,21 +34,24 @@ struct AnalyticsView: View {
     }
 
     var body: some View {
+        let range = dateRange(at: now)
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 periodSelector
                 if let summary {
-                    let data = RouteAnalytics(summary: summary, range: dateRange, category: names.category(for:))
+                    let data = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: names.category(for:))
                     if data.time.isEmpty {
                         ContentUnavailableView(
-                            "这段时间暂无统计",
-                            systemImage: "chart.bar.xaxis",
-                            description: Text("记录到移动或持续停留后，这里会显示时间分配和常去地点。")
+                            "这段时间尚未开始",
+                            systemImage: "calendar",
+                            description: Text("可以选择包含今天或过去日期的范围。")
                         )
                     } else {
-                        timeAllocation(data)
+                        timeAllocation(data, range: range)
                         if !data.places.isEmpty { topPlaces(data) }
-                        behaviorCards(RouteBehavior(summary: summary, range: dateRange, calendar: calendar, category: names.category(for:)))
+                        if data.trackedDuration > 0 {
+                            behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
+                        }
                     }
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
@@ -56,10 +61,12 @@ struct AnalyticsView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
+        .onAppear { now = .now }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
     }
 
-    private var dateRange: ClosedRange<Date> {
-        if let component = period.interval, let interval = calendar.dateInterval(of: component, for: .now) {
+    private func dateRange(at now: Date) -> ClosedRange<Date> {
+        if let component = period.interval, let interval = calendar.dateInterval(of: component, for: now) {
             return interval.start...calendar.startOfDay(for: interval.end.addingTimeInterval(-1))
         }
         return calendar.startOfDay(for: start)...calendar.startOfDay(for: max(start, end))
@@ -85,8 +92,11 @@ struct AnalyticsView: View {
         }
     }
 
-    private func timeAllocation(_ data: RouteAnalytics) -> some View {
-        analyticsCard("已记录时间分配") {
+    private func timeAllocation(_ data: RouteAnalytics, range: ClosedRange<Date>) -> some View {
+        analyticsCard("时间分配与记录覆盖") {
+            Text("已记录 \(routeDuration(data.trackedDuration)) / \(routeDuration(data.elapsedDuration))")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
             Chart(data.time) { item in
                 SectorMark(angle: .value("记录时长", item.seconds),
                            innerRadius: .ratio(0.64), angularInset: 1.5)
@@ -121,7 +131,7 @@ struct AnalyticsView: View {
             .chartForegroundStyleScale(domain: RouteTimeUse.allCases.map(\.title), range: RouteTimeUse.allCases.map(\.color))
             .chartLegend(.hidden)
             .chartYAxisLabel("小时")
-            .chartXScale(domain: dateRange.lowerBound...(calendar.date(byAdding: .day, value: 1, to: dateRange.upperBound) ?? dateRange.upperBound))
+            .chartXScale(domain: chartDays(data.days, fallback: range.lowerBound))
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                     AxisGridLine()
@@ -130,6 +140,12 @@ struct AnalyticsView: View {
             }
             .frame(height: 160)
         }
+    }
+
+    private func chartDays(_ days: [RouteAnalytics.Day], fallback: Date) -> ClosedRange<Date> {
+        let start = days.first?.date ?? fallback
+        let last = days.last?.date ?? start
+        return start...(calendar.date(byAdding: .day, value: 1, to: last) ?? last)
     }
 
     @ViewBuilder
@@ -291,6 +307,7 @@ private extension RouteTimeUse {
         case .leisure: .orange
         case .exercise: .green
         case .other: .gray
+        case .untracked: Color.secondary.opacity(0.26)
         }
     }
 }

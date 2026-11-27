@@ -45,17 +45,20 @@ final class ReviewUITests: XCTestCase {
         app.buttons["开启自动地名"].tap()
         XCTAssertTrue(app.alerts["开启自动地名？"].waitForExistence(timeout: 5))
         app.alerts.buttons["取消"].tap()
+        app.tabBars.buttons["分析"].tap()
+        XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "未记录")).firstMatch.exists)
     }
 
     func testAnalyticsPeriodAndRanking() {
         let app = launch(fixture: "day")
         app.tabBars.buttons["分析"].tap()
-        XCTAssertTrue(app.staticTexts["已记录时间分配"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 8), app.debugDescription)
         app.tabBars.buttons["回顾"].tap()
         let day = app.descendants(matching: .any).matching(identifier: "review-day").firstMatch
         XCTAssertTrue(day.waitForExistence(timeout: 5))
         app.tabBars.buttons["分析"].tap()
-        XCTAssertTrue(app.staticTexts["已记录时间分配"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 5))
         app.buttons["自定义"].tap()
         let startDate = app.descendants(matching: .any).matching(identifier: "analytics-start-date").firstMatch
         let endDate = app.descendants(matching: .any).matching(identifier: "analytics-end-date").firstMatch
