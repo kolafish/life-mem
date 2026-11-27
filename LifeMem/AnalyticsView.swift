@@ -11,6 +11,7 @@ struct AnalyticsView: View {
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var now = Date.now
+    @State private var refreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
@@ -35,6 +36,7 @@ struct AnalyticsView: View {
 
     var body: some View {
         let range = dateRange(at: now)
+        let patterns = summary.map { RouteBehavior.routePatterns(in: $0.journeys, calendar: calendar) } ?? []
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 periodSelector
@@ -50,6 +52,11 @@ struct AnalyticsView: View {
                         timeAllocation(data, range: range)
                         if !data.places.isEmpty { topPlaces(data) }
                         if data.trackedDuration > 0 {
+                            RouteInsightCards(
+                                insights: RouteInsights(summary: summary, analytics: data, range: range,
+                                                         calendar: calendar, now: now, patterns: patterns, category: names.category(for:)),
+                                title: { patternTitle($0, index: $1) }
+                            )
                             behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
                         }
                     }
@@ -62,7 +69,7 @@ struct AnalyticsView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
         .onAppear { now = .now }
-        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
+        .onReceive(refreshTimer) { now = $0 }
     }
 
     private func dateRange(at now: Date) -> ClosedRange<Date> {
@@ -288,7 +295,7 @@ struct AnalyticsView: View {
     }
 }
 
-private func analyticsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+func analyticsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 12) {
         Text(title).font(.headline).accessibilityAddTraits(.isHeader)
         content()

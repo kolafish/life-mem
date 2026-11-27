@@ -91,6 +91,7 @@ struct RouteChecks {
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
+        try checkInsights(context: context)
         try checkPlaceSuggestions(context: context)
         try checkPlaceNames(in: root)
         try await checkSummaryIndex(context: context, directory: root)
@@ -523,6 +524,72 @@ struct RouteChecks {
         }
         precondition(Set(overnightRoutine.routine.map(\.kind)) == [.departure, .arrival])
         precondition(overnightRoutine.routine.allSatisfy { $0.day == midnight && $0.time == midnight.addingTimeInterval(10) })
+    }
+
+    @MainActor
+    private static func checkInsights(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let week = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
+        let upper = calendar.date(byAdding: .day, value: 6, to: week)!
+        let now = week.addingTimeInterval(3 * 86_400)
+        let home = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let work = CLLocationCoordinate2D(latitude: 0, longitude: 0.02)
+        let newPlace = CLLocationCoordinate2D(latitude: 0, longitude: 0.03)
+        let pointRoute = insertRoute(context: context, start: week,
+                                     samples: (0..<12).map { (Double($0 * 10), 0, .unknown, $0 == 0) })
+        try context.save()
+        let ids = pointRoute.points.map(\.persistentModelID)
+        var journeys: [RouteJourney] = []
+        let trips: [(Int, TimeInterval, TravelMode, Bool)] = [
+            (-20, 1_200, .automotive, false), (-7, 1_800, .automotive, false), (-6, 2_400, .automotive, false),
+            (0, 1_620, .automotive, false), (1, 1_380, .automotive, false), (2, 3_600, .automotive, true),
+            (1, 2_200, .cycling, false), (4, 9_000, .automotive, false)
+        ]
+        for (index, trip) in trips.enumerated() {
+            let (offset, duration, mode, reverse) = trip
+            let time = week.addingTimeInterval(Double(offset * 86_400 + 8 * 3_600))
+            let endpoints = RouteReviewEntry.Endpoints(start: reverse ? work : home, end: reverse ? home : work)
+            journeys.append(RouteJourney(id: ids[index], endpoints: endpoints, departedAt: time,
+                                         duration: duration, mode: mode, departureStay: nil, arrivalStay: nil))
+        }
+
+        let stay = insertRoute(context: context, start: week, samples: stop(start: 0, longitude: 0))
+        try context.save()
+        let stays = RouteReview(routes: [stay], calendar: calendar)
+        let knownHome = stays.places[0].visits[0]
+        let priorStay = insertRoute(context: context, start: week.addingTimeInterval(-86_400),
+                                    samples: stop(start: 0, longitude: 0) + [
+                                        (510, 0.0003, .walking, true), (540, 0.0006, .walking, false)
+                                    ])
+        try context.save()
+        let prior = RouteReview(routes: [priorStay], calendar: calendar)
+        let priorHome = prior.places[0].visits[0]
+        let firstVisit = RouteVisit(id: ids[9], date: week, startedAt: week, endedAt: week.addingTimeInterval(480), coordinate: newPlace)
+        let futureVisit = RouteVisit(id: ids[10], date: upper, startedAt: upper, endedAt: upper.addingTimeInterval(480),
+                                     coordinate: .init(latitude: 0, longitude: 0.04))
+        let record = RouteSummaryRecord(days: (stays.days + prior.days).map(DailySummary.init(day:)),
+                                        visits: [knownHome, priorHome, firstVisit, futureVisit], journeys: journeys)
+        let summary = RouteSummary(records: [record])
+        func category(_ coordinate: CLLocationCoordinate2D) -> PlaceCategory? {
+            if coordinate.longitude == 0 { return .home }
+            return coordinate.longitude == 0.02 ? .work : nil
+        }
+        let range = week...upper
+        let patterns = RouteBehavior.routePatterns(in: journeys, calendar: calendar)
+        let analytics = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: category)
+        let insights = RouteInsights(summary: summary, analytics: analytics, range: range, calendar: calendar, now: now, patterns: patterns, category: category)
+        precondition(insights.newPlaceCount == 1 && insights.home?.share == 1)
+        precondition(insights.home?.previousShare == 480.0 / 540.0)
+        precondition(insights.home?.trackedDuration == 480 && insights.home?.elapsedDuration == 3 * 86_400)
+        precondition(insights.commute?.sampleCount == 2 && insights.commute?.previousSampleCount == 2)
+        precondition(insights.commute?.average == 1_500 && insights.commute?.previousAverage == 2_100)
+        precondition(insights.commute?.fastestSample.duration == 1_380)
+        precondition(insights.routes.count == 1 && insights.routes[0].fastest == 1_200 && insights.routes[0].slowest == 2_400)
+
+        let sparse = RouteInsights(summary: summary, analytics: analytics, range: week...week,
+                                   calendar: calendar, now: now, patterns: patterns, category: category)
+        precondition(sparse.commute == nil && sparse.routes.isEmpty)
     }
 
     @MainActor
