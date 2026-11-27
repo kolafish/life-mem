@@ -272,11 +272,18 @@ struct RouteChecks {
         let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay) { _ in .home }
         precondition(bothDays.days.map(\.date) == [day, nextDay])
         precondition(bothDays.time.first { $0.use == .home }?.seconds == 480)
-        precondition(bothDays.time.first { $0.use == .moving }?.seconds == 40)
+        precondition(bothDays.time.first { $0.use == .moving }?.seconds == 60)
+        precondition(midnightReview.days.allSatisfy { $0.movingDuration == 30 })
         precondition(bothDays.places.count == 1 && bothDays.places[0].visits == 1 && bothDays.places[0].seconds == 480)
         let onlyNextDay = RouteAnalytics(review: midnightReview, range: nextDay...nextDay) { _ in nil }
         precondition(onlyNextDay.time.first { $0.use == .other }?.seconds == 360)
         precondition(onlyNextDay.places[0].visits == 1 && onlyNextDay.places[0].seconds == 360)
+
+        let midnightEdge = insertRoute(context: context, start: nextDay.addingTimeInterval(-10), samples: [
+            (0, 0, .walking, true), (20, 0.0002, .walking, false)
+        ])
+        let midnightOnly = RouteReview(routes: [midnightEdge], calendar: calendar)
+        precondition(midnightOnly.days.allSatisfy { $0.movingDuration == 10 && $0.movingDistanceMeters > 10 })
 
         let longVisit = insertRoute(context: context, start: morning, samples: stride(from: 0, through: 1_200, by: 30).map {
             (Double($0), 0.05, .stationary, $0 == 0)
