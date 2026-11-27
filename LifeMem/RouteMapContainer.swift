@@ -33,9 +33,10 @@ struct RouteMapContainer: View {
             }
             ForEach(entries.filter { $0.stay == nil }) { entry in
                 ForEach(entry.segments) { segment in
-                    if segment.mode != .stationary, segment.coordinates.count > 1 {
+                    let coordinates = segment.coordinates
+                    if segment.mode != .stationary, coordinates.count > 1 {
                         let focused = selected == nil || selected?.id == entry.id
-                        MapPolyline(coordinates: segment.coordinates)
+                        MapPolyline(coordinates: coordinates)
                             .stroke(segment.mode.mapColor.opacity(focused ? 1 : 0.4), style: StrokeStyle(
                                 lineWidth: focused ? 4 : 3, lineCap: .round, lineJoin: .round,
                                 dash: segment.mode == .walking ? [5, 6] : []
@@ -136,7 +137,7 @@ struct RouteMapContainer: View {
     @MapContentBuilder
     private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
         let segments = entry.segments.filter { $0.mode != .stationary }
-        if let start = segments.first?.coordinates.first, let end = segments.last?.coordinates.last {
+        if let start = segments.first?.firstCoordinate, let end = segments.last?.lastCoordinate {
             let startName = entry.endpoints.flatMap { placeResolver.label(near: $0.start, names: placeNames) }
             let endName = entry.endpoints.flatMap { placeResolver.label(near: $0.end, names: placeNames) }
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {

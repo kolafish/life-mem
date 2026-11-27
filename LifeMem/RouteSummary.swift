@@ -56,7 +56,7 @@ struct RouteSummary {
 
 actor RouteSummaryIndex {
     // Increment when the stored fields or the segmentation and projection rules change.
-    private static let version = 1
+    private static let version = 2
 
     private struct Index: Codable {
         let version: Int

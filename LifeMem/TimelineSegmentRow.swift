@@ -109,9 +109,12 @@ struct TimelineSegmentRow: View {
         let seconds = moves.reduce(0) { $0 + $1.duration }
         let distance = routeDistance(meters)
         let duration = routeDuration(seconds)
-        let speed = (meters / seconds * 3.6).formatted(.number.precision(.fractionLength(1)))
         let modes = Set(moves.map(\.mode))
-        if modes.count == 1 { return "\(distance) · \(duration) · \(speed) 公里/小时" }
+        if modes.count == 1 {
+            guard seconds.isFinite, seconds > 0 else { return distance }
+            let speed = (meters / seconds * 3.6).formatted(.number.precision(.fractionLength(1)))
+            return "\(distance) · \(duration) · \(speed) 公里/小时"
+        }
         let modeNames = TravelMode.allCases.filter { modes.contains($0) }.map(\.recordedTitle).joined(separator: "、")
         return "\(modeNames) · \(distance) · \(duration)"
     }

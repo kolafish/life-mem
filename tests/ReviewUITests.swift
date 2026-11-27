@@ -50,6 +50,23 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "未记录")).firstMatch.exists)
     }
 
+    func testTwoPointRouteAppearsOnEachSideOfMidnight() {
+        let app = launch(fixture: "midnight")
+        app.tabBars.buttons["回顾"].tap()
+        let days = app.descendants(matching: .any).matching(identifier: "review-day")
+        XCTAssertTrue(days.element(boundBy: 1).waitForExistence(timeout: 8))
+        for index in 0...1 {
+            days.element(boundBy: index).tap()
+            let walk = app.buttons.matching(identifier: "timeline-entry")
+                .matching(NSPredicate(format: "label CONTAINS %@", "步行")).firstMatch
+            scrollTo(walk, in: app, horizontalOffset: 0.98)
+            XCTAssertTrue(walk.isHittable, app.debugDescription)
+            walk.tap()
+            XCTAssertTrue(app.buttons["显示全天"].waitForExistence(timeout: 5))
+            app.navigationBars.buttons["回顾"].tap()
+        }
+    }
+
     func testAnalyticsPeriodAndRanking() {
         let app = launch(fixture: "day")
         app.tabBars.buttons["分析"].tap()
@@ -145,9 +162,9 @@ final class ReviewUITests: XCTestCase {
         XCTAssertFalse(confirm.exists)
     }
 
-    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.73))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.49))
+    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication, horizontalOffset: Double = 0.5) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: 0.73))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: 0.49))
         for _ in 0..<12 {
             if element.isHittable { return }
             start.press(forDuration: 0.15, thenDragTo: end)

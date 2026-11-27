@@ -158,6 +158,22 @@ private enum ReviewTestFixture {
             try context.save()
             return
         }
+        if scenario == "midnight" {
+            let midnight = Calendar.current.startOfDay(for: .now.addingTimeInterval(-3_600))
+            let start = midnight.addingTimeInterval(-20)
+            let route = RecordedRoute(startedAt: start)
+            route.isFinished = true
+            context.insert(route)
+            for index in 0...1 {
+                let location = CLLocation(coordinate: .init(latitude: 37.3317, longitude: -122.0307 + Double(index) * 0.001),
+                                          altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5,
+                                          timestamp: start.addingTimeInterval(Double(index) * 40))
+                context.insert(RoutePoint(location: location, mode: .walking, startsNewSegment: index == 0, route: route))
+                route.pointCount += 1
+            }
+            try context.save()
+            return
+        }
         guard scenario == "day" else { return }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)

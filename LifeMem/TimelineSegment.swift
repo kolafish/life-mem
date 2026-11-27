@@ -44,25 +44,18 @@ struct RouteReviewEntry: Identifiable {
 }
 
 struct RouteReviewDay: Identifiable {
-    struct Movement {
-        var duration: TimeInterval = 0
-        var distance: CLLocationDistance = 0
-        var intervals: [DateInterval] = []
-    }
-
     var id: Date { date }
 
     let date: Date
     let entries: [RouteReviewEntry]
-    private(set) var midnightMovement = Movement()
 
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
     var stays: [StayEvent] { entries.compactMap(\.stay) }
     var moves: [MoveEvent] { entries.flatMap(\.moves) }
-    var movingDistanceMeters: CLLocationDistance { moves.reduce(midnightMovement.distance) { $0 + $1.distanceMeters } }
-    var movingDuration: TimeInterval { moves.reduce(midnightMovement.duration) { $0 + $1.duration } }
+    var movingDistanceMeters: CLLocationDistance { moves.reduce(0) { $0 + $1.distanceMeters } }
+    var movingDuration: TimeInterval { moves.reduce(0) { $0 + $1.duration } }
     var movementIntervals: [DateInterval] {
-        moves.map { DateInterval(start: $0.startedAt, end: $0.endedAt) } + midnightMovement.intervals
+        moves.map { DateInterval(start: $0.startedAt, end: $0.endedAt) }
     }
 }
 
