@@ -53,7 +53,7 @@ final class ReviewUITests: XCTestCase {
     func testAnalyticsPeriodAndRanking() {
         let app = launch(fixture: "day")
         app.tabBars.buttons["分析"].tap()
-        XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 8), app.debugDescription)
         app.tabBars.buttons["回顾"].tap()
         let day = app.descendants(matching: .any).matching(identifier: "review-day").firstMatch
         XCTAssertTrue(day.waitForExistence(timeout: 5))

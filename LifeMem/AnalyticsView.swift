@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import SwiftData
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct AnalyticsView: View {
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var now = Date.now
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
@@ -32,35 +34,35 @@ struct AnalyticsView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { tick in
-            let range = dateRange(at: tick.date)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    periodSelector
-                    if let summary {
-                        let data = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: tick.date, category: names.category(for:))
-                        if data.time.isEmpty {
-                            ContentUnavailableView(
-                                "这段时间尚未开始",
-                                systemImage: "calendar",
-                                description: Text("可以选择包含今天或过去日期的范围。")
-                            )
-                        } else {
-                            timeAllocation(data, range: range)
-                            if !data.places.isEmpty { topPlaces(data) }
-                            if data.trackedDuration > 0 {
-                                behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
-                            }
-                        }
+        let range = dateRange(at: now)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                periodSelector
+                if let summary {
+                    let data = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: names.category(for:))
+                    if data.time.isEmpty {
+                        ContentUnavailableView(
+                            "这段时间尚未开始",
+                            systemImage: "calendar",
+                            description: Text("可以选择包含今天或过去日期的范围。")
+                        )
                     } else {
-                        ProgressView().frame(maxWidth: .infinity)
+                        timeAllocation(data, range: range)
+                        if !data.places.isEmpty { topPlaces(data) }
+                        if data.trackedDuration > 0 {
+                            behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
+                        }
                     }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity)
                 }
-                .padding(16)
             }
+            .padding(16)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
+        .onAppear { now = .now }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
     }
 
     private func dateRange(at now: Date) -> ClosedRange<Date> {
