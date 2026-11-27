@@ -27,7 +27,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ## 回顾
 
-- 「时间线」按设备日历汇总已记录的日期，跨午夜的路线分日显示。点进某天可看到当天轨迹、行程和停留。点一趟行程可单独看它的路线、起终点和方向，展开「活动片段」可以查看具体的活动与时间。暂停恢复或有效坐标相隔超过 90 秒时，地图按原有分段留出断口。
+- 「时间线」按设备日历汇总已记录的日期，跨午夜的路线分日显示。点进某天可以看记录跨度、移动里程、移动耗时和各类停留。地图用绿色虚线表示步行、橙色表示骑行、蓝色表示乘车。点停留气泡会滚动到时间线卡片，点时间线卡片会聚焦对应位置或路段。选中混合行程后可以展开「移动片段」。暂停恢复或有效坐标相隔超过 90 秒时，地图按原有分段留出断口。
 - 「地点」汇总至少连续观测 8 分钟、定位点落在起点 60 米内且没有明确运动状态的停留。停留位置按定位精度加权，回顾时不将停留漂移算作出行。相距约 100 米以内的停留合并为一处。跨午夜的停留按午夜分摊时长，在地点里计为一次到访。移动方式优先采用已记录的运动状态，未知时根据相邻点的速度估算步行、骑行或乘车。
 - 点选行程后，在地图下方的「地名」里选择起点或终点。可以直接输入名称，或点「查找地名」让系统地图用这个端点的坐标提供附近地点和地址候选。在停留地点或行程端点也可以选择家、工作／学习、餐饮等分类。保存的名称优先显示，并在附近的行程起终点和停留地点复用。
 - 可在「回顾」右上角的选项里开启自动地名。开启后，查看某天或某个地点时，App 会异步将尚未命名的停留中心坐标交给 Apple 地图服务，查找 50 米内的 POI 和附近街区。结果缓存在本机，离线时可以复用。可随时在回顾选项里清除建议和查询坐标。
@@ -56,4 +56,14 @@ xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift 
 xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath DerivedData/simulator CODE_SIGNING_ALLOWED=NO build
+```
+
+### 回顾界面回归
+
+在已启动的 iPhone 模拟器上运行，使用隔离的临时存储和合成路线。将 `SIMULATOR_ID` 换成 `xcrun simctl list devices booted` 中的模拟器 ID。
+
+```sh
+xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
+  -destination 'id=SIMULATOR_ID' -derivedDataPath DerivedData/ui-tests \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
 ```

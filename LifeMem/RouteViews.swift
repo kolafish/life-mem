@@ -142,6 +142,7 @@ struct RouteHistoryView: View {
                                 detail: daySummary(day)
                             )
                         }
+                        .accessibilityIdentifier("review-day")
                     }
                 } header: {
                     Text(month, format: .dateTime.year().month(.wide))
@@ -244,79 +245,70 @@ private struct RoutePlaceReviewView: View {
 
 private struct RouteDayReviewView: View {
     let day: RouteReviewDay
+
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: RouteReviewEntry.ID?
     @State private var namingTarget: PlaceNamingTarget?
+    private let initialFocus: RouteReviewEntry.ID?
 
     init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil) {
         self.day = day
+        initialFocus = focus
         _selectedID = State(initialValue: focus)
     }
 
     var body: some View {
         let selected = day.entries.first { $0.id == selectedID }
         ScrollViewReader { proxy in
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(selected.map { title(for: $0) } ?? "当天轨迹")
-                                .font(.subheadline.weight(.semibold))
-                            if let selected {
-                                Text(clockRange(selected.startedAt, selected.endedAt))
-                                    .font(.footnote.monospacedDigit())
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
+                    DailyReviewSummary(day: day)
+                    Section {
+                        ForEach(day.entries) { entry in
+                            if entry.followsGap {
+                                Label("记录中断", systemImage: "ellipsis")
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
+                                    .padding(.leading, 12)
                             }
+                            timelineCard(entry)
+                                .id(entry.id)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        ReviewMap(entries: selected.map { [$0] } ?? day.entries, focused: selected != nil)
-                            .frame(height: 220)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .id("review-map")
-                } footer: {
-                    if let selected {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 16) { mapActions(for: selected) }
-                                .fixedSize(horizontal: true, vertical: false)
-                            VStack(alignment: .leading, spacing: 0) { mapActions(for: selected) }
-                        }
-                    }
-                }
-
-                Section("时间线") {
-                    ForEach(day.entries) { entry in
-                        if entry.followsGap {
-                            Label("记录中断", systemImage: "ellipsis")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        Button {
-                            selectedID = entry.id
-                            proxy.scrollTo("review-map", anchor: .top)
-                        } label: {
-                            entryRow(entry, selected: selectedID == entry.id)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(selectedID == entry.id ? .isSelected : [])
-                        if selectedID == entry.id, entry.kind != .visit, entry.segments.count > 1 {
-                            DisclosureGroup("活动片段") {
-                                ForEach(entry.segments) { segment in
-                                    ReviewTextRow(
-                                        title: segment.mode.recordedTitle,
-                                        detail: clockRange(segment.startedAt, segment.endedAt)
-                                    )
+                    } header: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("时间线").font(.headline).accessibilityAddTraits(.isHeader)
+                                Spacer(minLength: 8)
+                                if selected != nil {
+                                    Button("显示全天") { selectedID = nil }
+                                        .font(.subheadline)
+                                        .frame(minHeight: 44)
                                 }
                             }
-                            .font(.subheadline)
+                            .frame(minHeight: 44)
+                            ReviewMap(entries: day.entries, selected: selected) { id in
+                                selectedID = id
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                                    proxy.scrollTo(id, anchor: .bottom)
+                                }
+                            }
+                            .frame(height: 184)
+                            .clipShape(.rect(cornerRadius: 16))
                         }
+                        .padding(.bottom, 8)
+                        .background(Color(uiColor: .systemGroupedBackground))
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
-            .listStyle(.insetGrouped)
+            .task {
+                if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }
+            }
         }
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: placeResolver.isAutomaticEnabled && namingTarget == nil) {
@@ -335,21 +327,78 @@ private struct RouteDayReviewView: View {
         }
     }
 
+    private func timelineCard(_ entry: RouteReviewEntry) -> some View {
+        let selected = selectedID == entry.id
+        let category = entry.visitCoordinate.flatMap { placeNames.category(for: $0) }
+        let moves = entry.moves
+        let color = category?.mapColor ?? (entry.kind == .visit ? .teal : moves.first?.mode.mapColor ?? .secondary)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                selectedID = entry.id
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: category?.symbol ?? entry.symbol)
+                        .foregroundStyle(color)
+                        .frame(width: 29)
+                        .accessibilityHidden(true)
+                    ReviewTextRow(
+                        title: title(for: entry),
+                        detail: entry.stay.map { routeDuration($0.duration) } ?? moveDetail(moves),
+                        time: clockRange(entry.startedAt, entry.endedAt)
+                    )
+                    Spacer(minLength: 4)
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.indigo)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timeline-entry")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            if selected {
+                if moves.count > 1 {
+                    DisclosureGroup("移动片段") {
+                        ForEach(moves) { move in
+                            ReviewTextRow(
+                                title: move.mode.recordedTitle,
+                                detail: moveDetail([move]),
+                                time: clockRange(move.startedAt, move.endedAt)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .font(.subheadline)
+                    .padding(.vertical, 6)
+                }
+                namingAction(for: entry)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(selected ? Color.indigo.opacity(0.09) : Color(uiColor: .secondarySystemGroupedBackground),
+                    in: .rect(cornerRadius: 14))
+    }
+
     @ViewBuilder
-    private func mapActions(for entry: RouteReviewEntry) -> some View {
-        Button("查看当天全部") { selectedID = nil }
-            .frame(minHeight: 44)
+    private func namingAction(for entry: RouteReviewEntry) -> some View {
         if let endpoints = entry.endpoints {
             Menu {
                 Button("起点地名") { namePlace("起点地名", at: endpoints.start) }
                 Button("终点地名") { namePlace("终点地名", at: endpoints.end) }
             } label: {
-                Label("地名", systemImage: "tag")
-                    .frame(minHeight: 44)
+                Label("地名", systemImage: "tag").frame(minHeight: 44)
             }
         } else if let coordinate = entry.visitCoordinate {
-            Button("编辑地名") { namePlace("停留地点", at: coordinate) }
-                .frame(minHeight: 44)
+            Button {
+                namePlace("停留地点", at: coordinate)
+            } label: {
+                Label("编辑地名", systemImage: "tag").frame(minHeight: 44)
+            }
         }
     }
 
@@ -358,33 +407,115 @@ private struct RouteDayReviewView: View {
     }
 
     private func title(for entry: RouteReviewEntry) -> String {
+        if let coordinate = entry.visitCoordinate {
+            return placeResolver.label(near: coordinate, names: placeNames) ?? "停留地点"
+        }
         if let endpoints = entry.endpoints {
             let start = placeResolver.label(near: endpoints.start, names: placeNames)
             let end = placeResolver.label(near: endpoints.end, names: placeNames)
-            if start != nil || end != nil {
-                return "\(start ?? "起点") → \(end ?? "终点")"
-            }
+            if start != nil || end != nil { return "\(start ?? "起点") → \(end ?? "终点")" }
         }
-        if let coordinate = entry.visitCoordinate, let name = placeResolver.label(near: coordinate, names: placeNames) {
-            return name
+        if let mode = entry.moves.first?.mode, entry.moves.allSatisfy({ $0.mode == mode }) {
+            return mode.recordedTitle
         }
         return entry.title
     }
 
-    private func entryRow(_ entry: RouteReviewEntry, selected: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: entry.symbol)
-                .foregroundStyle(entry.kind == .visit ? Color.teal : .indigo)
-                .frame(width: 24)
-                .accessibilityHidden(true)
-            ReviewTextRow(title: title(for: entry), detail: entry.subtitle, time: clockRange(entry.startedAt, entry.endedAt))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: selected ? "checkmark.circle.fill" : "scope")
-                .foregroundStyle(selected ? Color.indigo : .secondary)
-                .accessibilityHidden(true)
+    private func moveDetail(_ moves: [MoveEvent]) -> String? {
+        guard !moves.isEmpty else { return nil }
+        let meters = moves.reduce(0) { $0 + $1.distanceMeters }
+        let seconds = moves.reduce(0) { $0 + $1.duration }
+        let distance = routeDistance(meters)
+        let duration = routeDuration(seconds)
+        let speed = (meters / seconds * 3.6).formatted(.number.precision(.fractionLength(1)))
+        let modes = Set(moves.map(\.mode))
+        if modes.count == 1 { return "\(distance) · \(duration) · \(speed) 公里/小时" }
+        let modeNames = TravelMode.allCases.filter { modes.contains($0) }.map(\.recordedTitle).joined(separator: "、")
+        return "\(modeNames) · \(distance) · \(duration)"
+    }
+}
+
+private struct DailyReviewSummary: View {
+    let day: RouteReviewDay
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(RoutePlaceNames.self) private var placeNames
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("当日概览").font(.headline).accessibilityAddTraits(.isHeader)
+                .padding(.vertical, 4)
+            if let start = day.entries.first?.startedAt, let end = day.entries.map(\.endedAt).max() {
+                metric("记录跨度", clockRange(start, end), symbol: "clock")
+            }
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 8) { movementMetrics }
+            } else {
+                HStack(spacing: 8) { movementMetrics }
+            }
+            stayDistribution
         }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var movementMetrics: some View {
+        metric("移动里程", routeDistance(day.movingDistanceMeters), symbol: "point.topleft.down.to.point.bottomright.curvepath")
+        metric("移动耗时", routeDuration(day.movingDuration), symbol: "timer")
+    }
+
+    private func metric(_ title: String, _ value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold).monospacedDigit())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var stayDistribution: some View {
+        let durations = day.stays.reduce(into: [PlaceCategory: TimeInterval]()) { result, stay in
+            result[placeNames.category(for: stay.coordinate) ?? .other, default: 0] += stay.duration
+        }
+        let categories = PlaceCategory.allCases.filter { (durations[$0] ?? 0) > 0 }
+        let total = durations.values.reduce(0, +)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("停留分布").font(.subheadline).foregroundStyle(.secondary)
+            if categories.isEmpty {
+                Text("当天没有观测到持续停留").font(.footnote).foregroundStyle(.secondary)
+            } else {
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        ForEach(categories) { category in
+                            Rectangle()
+                                .fill(category.mapColor)
+                                .frame(width: geometry.size.width * (durations[category, default: 0] / total))
+                        }
+                    }
+                }
+                .frame(height: 7)
+                .clipShape(.capsule)
+                .accessibilityHidden(true)
+                ForEach(categories) { category in
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(category == .other ? "其他停留" : category.title, systemImage: category.symbol)
+                            .foregroundStyle(category == .other ? Color.secondary : Color.primary)
+                        Spacer(minLength: 8)
+                        Text(routeDuration(durations[category, default: 0])).monospacedDigit()
+                    }
+                    .font(.footnote)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
     }
 }
 
@@ -487,60 +618,138 @@ private struct RouteArchiveView: View {
 
 private struct ReviewMap: View {
     let entries: [RouteReviewEntry]
-    let focused: Bool
+    let selected: RouteReviewEntry?
+    let selectStay: (RouteReviewEntry.ID) -> Void
+
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @State private var position: MapCameraPosition = .automatic
 
     private struct Viewport: Equatable {
-        let focused: Bool
-        let entries: [Entry]
+        let selection: RouteReviewEntry.ID?
+        let endedAt: Date?
+    }
 
-        struct Entry: Equatable {
-            let id: RouteReviewEntry.ID
-            let endedAt: Date
-        }
+    private struct StayMarkers: Identifiable {
+        var stays: [StayEvent]
+        var id: StayEvent.ID { stays[0].id }
+        var coordinate: CLLocationCoordinate2D { stays[0].coordinate }
     }
 
     var body: some View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
-            ForEach(entries) { entry in
-                if let coordinate = entry.visitCoordinate {
-                    Marker(
-                        placeResolver.label(near: coordinate, names: placeNames) ?? "停留",
-                        systemImage: placeNames.category(for: coordinate)?.symbol ?? "mappin",
-                        coordinate: coordinate
-                    )
-                        .tint(.teal)
-                } else {
-                    ForEach(entry.segments) { segment in
-                        if segment.coordinates.count > 1 {
-                            MapPolyline(coordinates: segment.coordinates)
-                                .stroke(.indigo, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                        } else if segment.mode != .stationary || entry.kind == .fragment {
-                            Annotation("定位点", coordinate: segment.startCoordinate) {
-                                Circle().fill(.indigo).frame(width: 8, height: 8)
-                            }
-                            .annotationTitles(.hidden)
+            ForEach(stayMarkers) { group in
+                Annotation("停留", coordinate: group.coordinate) {
+                    stayMarker(group)
+                }
+                .annotationTitles(.hidden)
+            }
+            ForEach(entries.filter { $0.stay == nil }) { entry in
+                ForEach(entry.segments) { segment in
+                    if segment.mode != .stationary, segment.coordinates.count > 1 {
+                        let focused = selected == nil || selected?.id == entry.id
+                        MapPolyline(coordinates: segment.coordinates)
+                            .stroke(segment.mode.mapColor.opacity(focused ? 1 : 0.4), style: StrokeStyle(
+                                lineWidth: focused ? 4 : 3, lineCap: .round, lineJoin: .round,
+                                dash: segment.mode == .walking ? [5, 6] : []
+                            ))
+                    } else if segment.mode != .stationary || entry.kind == .fragment {
+                        Annotation("定位点", coordinate: segment.startCoordinate) {
+                            Circle().fill(segment.mode.mapColor).frame(width: 8, height: 8)
                         }
+                        .annotationTitles(.hidden)
                     }
-                    if focused, entry.kind == .trip {
-                        tripMarkers(entry)
-                    }
+                }
+                if selected?.id == entry.id, entry.kind == .trip {
+                    tripMarkers(entry)
                 }
             }
         }
         .mapStyle(.standard(emphasis: .muted))
-        .accessibilityLabel(focused ? "所选记录地图" : "当天轨迹地图")
-        .onChange(of: Viewport(focused: focused, entries: entries.map { .init(id: $0.id, endedAt: $0.endedAt) })) {
-            position = .automatic
+        .accessibilityIdentifier("daily-route-map")
+        .onChange(of: Viewport(selection: selected?.id, endedAt: selected?.endedAt), initial: true) {
+            position = selected.map(camera(for:)) ?? .automatic
         }
+    }
+
+    private var stayMarkers: [StayMarkers] {
+        entries.compactMap(\.stay).reduce(into: []) { groups, stay in
+            let location = MKMapPoint(stay.coordinate)
+            if let index = groups.firstIndex(where: { MKMapPoint($0.coordinate).distance(to: location) < 25 }) {
+                groups[index].stays.append(stay)
+            } else {
+                groups.append(StayMarkers(stays: [stay]))
+            }
+        }
+    }
+
+    private func stayMarker(_ group: StayMarkers) -> some View {
+        let category = placeNames.category(for: group.coordinate)
+        let name = placeResolver.label(near: group.coordinate, names: placeNames) ?? "停留地点"
+        let isSelected = group.stays.contains { $0.id == selected?.id }
+        let detail = group.stays.count == 1 ? routeDuration(group.stays[0].duration) : "\(group.stays.count) 次停留"
+        return Group {
+            if group.stays.count == 1 {
+                Button { selectStay(group.id) } label: { markerLabel(detail, category: category, selected: isSelected) }
+                    .buttonStyle(.plain)
+            } else {
+                Menu {
+                    ForEach(group.stays) { stay in
+                        Button(clockRange(stay.startedAt, stay.endedAt)) { selectStay(stay.id) }
+                    }
+                } label: {
+                    markerLabel(detail, category: category, selected: isSelected)
+                }
+            }
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        .accessibilityLabel("\(name)，\(detail)")
+        .accessibilityIdentifier("stay-marker")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func markerLabel(_ title: String, category: PlaceCategory?, selected: Bool) -> some View {
+        Label(title, systemImage: category?.symbol ?? "mappin")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(selected ? Color.indigo : category?.mapColor ?? .teal, in: .capsule)
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+
+    private func camera(for entry: RouteReviewEntry) -> MapCameraPosition {
+        if let coordinate = entry.visitCoordinate {
+            return .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 420, longitudinalMeters: 420))
+        }
+        let coordinates = entry.segments.flatMap(\.coordinates)
+        guard let first = coordinates.first else { return .automatic }
+        var south = first.latitude
+        var north = first.latitude
+        var west = 0.0
+        var east = 0.0
+        for point in coordinates.dropFirst() {
+            south = min(south, point.latitude)
+            north = max(north, point.latitude)
+            let offset = (point.longitude - first.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
+            west = min(west, offset)
+            east = max(east, offset)
+        }
+        let longitude = (first.longitude + (west + east) / 2 + 540).truncatingRemainder(dividingBy: 360) - 180
+        return .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: (north + south) / 2, longitude: longitude),
+            span: MKCoordinateSpan(latitudeDelta: min(180, max(0.004, (north - south) * 1.55)),
+                                   longitudeDelta: min(360, max(0.004, (east - west) * 1.55)))
+        ))
     }
 
     @MapContentBuilder
     private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
         let segments = entry.segments.filter { $0.mode != .stationary }
-        if let start = segments.first?.startCoordinate, let end = segments.last?.coordinates.last {
+        if let start = segments.first?.coordinates.first, let end = segments.last?.coordinates.last {
             let startName = entry.endpoints.flatMap { placeResolver.label(near: $0.start, names: placeNames) }
             let endName = entry.endpoints.flatMap { placeResolver.label(near: $0.end, names: placeNames) }
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
@@ -630,25 +839,47 @@ private extension RouteReviewEntry {
         }
     }
 
-    var subtitle: String? {
-        switch kind {
-        case .trip:
-            return modes.isEmpty ? "活动未分类" : modes.map(\.recordedTitle).joined(separator: "、")
-        case .visit:
-            let duration = endedAt.timeIntervalSince(startedAt)
-            guard duration >= 60 else { return nil }
-            return Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
-        case .fragment:
-            return nil
+}
+
+extension PlaceCategory {
+    var mapColor: Color {
+        switch self {
+        case .home: .teal
+        case .work: .indigo
+        case .dining: .orange
+        case .shopping: .pink
+        case .exercise: .green
+        case .leisure: .blue
+        case .other: .gray
         }
     }
 }
 
-extension RecordedRoute {
-    var formattedDistance: String {
-        if distanceMeters < 1_000 {
-            return "\(distanceMeters.formatted(.number.precision(.fractionLength(0)))) 米"
+private extension TravelMode {
+    var mapColor: Color {
+        switch self {
+        case .walking: .green
+        case .cycling: .orange
+        case .automotive: .blue
+        case .stationary: .teal
+        case .unknown: .gray
         }
-        return "\((distanceMeters / 1_000).formatted(.number.precision(.fractionLength(2)))) 公里"
     }
+}
+
+func routeDuration(_ seconds: TimeInterval) -> String {
+    if seconds == 0 { return "0 分钟" }
+    if seconds < 60 { return "\(Int(seconds.rounded())) 秒" }
+    return Duration.seconds(seconds).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+}
+
+private func routeDistance(_ meters: Double) -> String {
+    if meters < 1_000 {
+        return "\(meters.formatted(.number.precision(.fractionLength(0)))) 米"
+    }
+    return "\((meters / 1_000).formatted(.number.precision(.fractionLength(2)))) 公里"
+}
+
+extension RecordedRoute {
+    var formattedDistance: String { routeDistance(distanceMeters) }
 }

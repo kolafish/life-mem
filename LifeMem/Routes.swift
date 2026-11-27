@@ -126,8 +126,13 @@ struct RouteReviewEntry: Identifiable {
 
     var timeline: [TimelineSegment] {
         if let stay { return [.stay(stay)] }
-        return segments.filter { $0.distanceMeters > 0 }.map { .move(MoveEvent(activity: $0)) }
+        return moves.map(TimelineSegment.move)
     }
+    var moves: [MoveEvent] {
+        guard stay == nil else { return [] }
+        return segments.filter { $0.distanceMeters > 0 }.map(MoveEvent.init)
+    }
+
 }
 
 struct RouteReviewDay: Identifiable {
@@ -137,6 +142,10 @@ struct RouteReviewDay: Identifiable {
     let entries: [RouteReviewEntry]
 
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
+    var stays: [StayEvent] { entries.compactMap(\.stay) }
+    var moves: [MoveEvent] { entries.flatMap(\.moves) }
+    var movingDistanceMeters: CLLocationDistance { moves.reduce(0) { $0 + $1.distanceMeters } }
+    var movingDuration: TimeInterval { moves.reduce(0) { $0 + $1.duration } }
 }
 
 enum TimelineSegment: Identifiable {
