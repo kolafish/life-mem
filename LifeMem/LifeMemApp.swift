@@ -8,6 +8,8 @@ struct LifeMemApp: App {
     private let storage: Result<ModelContainer, Error>
     @State private var placeNames = RoutePlaceNames(file: LifeMemApp.storageDirectory.appending(path: "place-names.json"))
 
+    @State private var placeResolver = PlaceResolver(file: LifeMemApp.storageDirectory.appending(path: "place-suggestions.json"))
+
     init() {
         storage = Result {
             let schema = Schema([RecordedRoute.self, RoutePoint.self])
@@ -38,6 +40,7 @@ struct LifeMemApp: App {
                 RootView(context: container.mainContext)
                     .modelContainer(container)
                     .environment(placeNames)
+                    .environment(placeResolver)
             case .failure:
                 ContentUnavailableView(
                     "暂时无法打开路线存储",

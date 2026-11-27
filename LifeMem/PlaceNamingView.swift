@@ -11,15 +11,18 @@ struct PlaceNamingView: View {
     let target: PlaceNamingTarget
 
     @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    @State private var category: PlaceCategory?
     @State private var lookupID: UUID?
     @State private var suggestions: [String]?
     @State private var saveFailed = false
 
-    init(target: PlaceNamingTarget, initialName: String?) {
+    init(target: PlaceNamingTarget, initialName: String?, category: PlaceCategory?) {
         self.target = target
         _name = State(initialValue: initialName ?? "")
+        _category = State(initialValue: category)
     }
 
     var body: some View {
@@ -30,6 +33,21 @@ struct PlaceNamingView: View {
                         .accessibilityLabel("地点名称")
                     if placeNames.name(for: target.coordinate) != nil {
                         Button("移除地名", role: .destructive) { save(nil) }
+                    }
+                }
+                Section("地点分类") {
+                    Picker("分类", selection: $category) {
+                        Text("未分类").tag(nil as PlaceCategory?)
+                        ForEach(PlaceCategory.allCases) { item in
+                            Label(item.title, systemImage: item.symbol).tag(Optional(item))
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    .onChange(of: category) { previous, selected in
+                        if let selected, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                            name == previous?.defaultName {
+                            name = selected.defaultName
+                        }
                     }
                 }
                 Section {
@@ -45,7 +63,7 @@ struct PlaceNamingView: View {
                 } footer: {
                     Text("查找时会把这个地点的坐标交给系统地图服务。附近的行程和停留会复用你保存的名字。")
                 }
-                if let suggestions {
+                if let suggestions = suggestions ?? placeResolver.cached(near: target.coordinate)?.candidates {
                     Section("地图候选") {
                         if suggestions.isEmpty {
                             Text("暂时没有找到地名。可以手动输入，或稍后再查。")
@@ -92,7 +110,7 @@ struct PlaceNamingView: View {
             }
             .task(id: lookupID) {
                 guard lookupID != nil else { return }
-                let results = await PlaceLookup.suggestions(near: target.coordinate)
+                let results = await placeResolver.resolve(near: target.coordinate, automatic: false)?.candidates ?? []
                 guard !Task.isCancelled else { return }
                 suggestions = results
             }
@@ -113,62 +131,10 @@ struct PlaceNamingView: View {
 
     private func save(_ name: String?) {
         do {
-            try placeNames.save(name, for: target.coordinate)
+            try placeNames.save(name, category: category, for: target.coordinate)
             dismiss()
         } catch {
             saveFailed = true
-        }
-    }
-}
-
-@MainActor
-private enum PlaceLookup {
-    static func suggestions(near coordinate: CLLocationCoordinate2D) async -> [String] {
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: RouteReview.placeRadius)
-        let response = try? await MKLocalSearch(request: request).start()
-        guard !Task.isCancelled else { return [] }
-        let nearby = response?.mapItems.compactMap { item -> (name: String, distance: CLLocationDistance)? in
-            guard let name = item.name else { return nil }
-            let position: CLLocation?
-            if #available(iOS 26.0, *) {
-                position = item.location
-            } else {
-                position = item.placemark.location
-            }
-            guard let position else { return nil }
-            let distance = position.distance(from: location)
-            guard distance <= RouteReview.placeRadius else { return nil }
-            return (name, distance)
-        }.sorted { $0.distance < $1.distance } ?? []
-        let place = try? await geocodedPlace(for: location)
-        var seen: Set<String> = []
-        var names: [String] = []
-        for candidate in (place?.names ?? []) + nearby.map(\.name) {
-            let name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty, seen.insert(name).inserted {
-                names.append(name)
-                if names.count == 5 { break }
-            }
-        }
-        if let address = place?.address?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty {
-            let label = "\(address)附近"
-            if seen.insert(label).inserted { names.append(label) }
-        }
-        return names
-    }
-
-    private static func geocodedPlace(for location: CLLocation) async throws -> (names: [String], address: String?) {
-        if #available(iOS 26.0, *) {
-            guard let request = MKReverseGeocodingRequest(location: location),
-                  let item = try await request.mapItems.first else { return ([], nil) }
-            let name = item.pointOfInterestCategory != nil ? item.name : nil
-            let address = item.address?.shortAddress ?? item.addressRepresentations?.cityName
-            return ([name].compactMap { $0 }, address)
-        } else {
-            let placemark = try await CLGeocoder().reverseGeocodeLocation(location).first
-            let address = placemark?.thoroughfare ?? placemark?.subLocality ?? placemark?.locality
-            return (placemark?.areasOfInterest ?? [], address)
         }
     }
 }
