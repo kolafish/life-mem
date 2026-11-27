@@ -1,21 +1,83 @@
+import Contacts
 import CoreLocation
 import Foundation
 import MapKit
 import Observation
 
 struct MapPlaceSuggestion: Codable {
+    struct NearbyPoint {
+        let name: String
+        let distance: CLLocationDistance
+        let isLandmark: Bool
+    }
+
+    struct Address {
+        var street: String?
+        var district: String?
+        var city: String?
+        var detailed: String?
+    }
+
+    private struct RankedNames: Codable {
+        let label: String?
+        let choices: [String]
+    }
+
+    static let landmarkRadius: CLLocationDistance = 200
     let pointOfInterestNames: [String]
     let streetOrArea: String?
     let district: String?
     let city: String?
+    private var rankedNames: RankedNames?
+
+    init(pointOfInterestNames: [String], streetOrArea: String?, district: String?, city: String?) {
+        self.pointOfInterestNames = pointOfInterestNames
+        self.streetOrArea = streetOrArea
+        self.district = district
+        self.city = city
+    }
+
+    static func ranked(points: [NearbyPoint], address: Address) -> Self {
+        let ordered = points.filter { (0...landmarkRadius).contains($0.distance) && !$0.name.isEmpty }
+            .sorted { $0.distance == $1.distance ? $0.name < $1.name : $0.distance < $1.distance }
+        var seen: Set<String> = []
+        let close = ordered.filter { $0.distance <= 50 && seen.insert($0.name).inserted }
+        seen.removeAll()
+        let landmarks = ordered.filter { $0.isLandmark && seen.insert($0.name).inserted }
+        let trustedPoint: String?
+        if let first = close.first, close.count == 1 || close[1].distance - first.distance >= 12 {
+            trustedPoint = first.name
+        } else {
+            trustedPoint = nil
+        }
+        let street = usableName(address.street) ?? usableName(address.district)
+        let label = (trustedPoint ?? street ?? landmarks.first?.name ?? usableName(address.city)).map(nearbyLabel)
+        let choices = [label, usableName(address.detailed), street.map(nearbyLabel)].compactMap { $0 } +
+            close.prefix(5).map(\.name) + landmarks.prefix(3).map { nearbyLabel($0.name) }
+        seen.removeAll()
+        var result = Self(pointOfInterestNames: [], streetOrArea: nil, district: nil, city: nil)
+        result.rankedNames = RankedNames(label: label, choices: choices.filter { seen.insert($0).inserted })
+        return result
+    }
+
+    private static func nearbyLabel(_ name: String) -> String {
+        name.hasSuffix("附近") ? name : "\(name)附近"
+    }
+
+    private static func usableName(_ name: String?) -> String? {
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        return name
+    }
 
     var candidates: [String] {
+        if let rankedNames { return rankedNames.choices }
         var seen: Set<String> = []
         let nearby = (streetOrArea ?? district ?? city).map { "\($0)附近" }
         return (pointOfInterestNames + [nearby].compactMap { $0 }).filter { seen.insert($0).inserted }
     }
 
     var displayName: String? {
+        if let rankedNames { return rankedNames.label }
         if let poi = pointOfInterestNames.first { return "\(poi)附近" }
         return candidates.first
     }
@@ -27,7 +89,6 @@ final class PlaceResolver {
     private static let automaticPreference = "automaticPlaceLookup"
     private static let prefetchPreference = "prefetchPlaceNames"
     private static let introductionPreference = "dismissedAutomaticPlaceIntroduction"
-    private static let searchRadius: CLLocationDistance = 50
     private static let cacheRadius: CLLocationDistance = 25
 
     private enum AutomaticMode {
@@ -188,7 +249,8 @@ final class PlaceResolver {
             guard isPrefetchEnabled, names.loadIssue == nil, remaining > 0, !Task.isCancelled,
                   cache == cacheRevision, permission == automaticRevision else { return }
             if let retryAfter, clock.now < retryAfter { return }
-            guard !prefetchedVisits.contains(visit.id), label(near: visit.coordinate, names: names) == nil else { continue }
+            guard !prefetchedVisits.contains(visit.id), names.name(for: visit.coordinate) == nil,
+                  cached(near: visit.coordinate) == nil else { continue }
             await resolveAutomatically(near: visit.coordinate, names: names)
             guard !Task.isCancelled, cache == cacheRevision, permission == automaticRevision else { return }
             if let retryAfter, clock.now < retryAfter { return }
@@ -294,7 +356,7 @@ final class PlaceResolver {
             backoff = .zero
             retryAfter = nil
         }
-        guard let suggestion = result.suggestion, suggestion.displayName != nil else { return .completed(nil) }
+        guard let suggestion = result.suggestion, !suggestion.candidates.isEmpty else { return .completed(nil) }
         entries.append(Entry(latitude: coordinate.latitude, longitude: coordinate.longitude, suggestion: suggestion))
         if let data = try? JSONEncoder().encode(entries) {
             try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -312,7 +374,7 @@ final class PlaceResolver {
         checkDemand: DemandCheck
     ) async throws -> LookupResponse {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: searchRadius)
+        let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: MapPlaceSuggestion.landmarkRadius)
         let items: [MKMapItem]
         var lookupError: Error?
         do {
@@ -325,8 +387,8 @@ final class PlaceResolver {
             items = []
             lookupError = error
         }
-        let nearby = items.compactMap { item -> (name: String, distance: CLLocationDistance)? in
-            guard let name = item.name, !name.isEmpty else { return nil }
+        let nearby = items.compactMap { item -> MapPlaceSuggestion.NearbyPoint? in
+            guard let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
             let position: CLLocation?
             if #available(iOS 26.0, macOS 26.0, *) {
                 position = item.location
@@ -334,54 +396,58 @@ final class PlaceResolver {
                 position = item.placemark.location
             }
             guard let position else { return nil }
-            let distance = position.distance(from: location)
-            guard distance <= searchRadius else { return nil }
-            return (name, distance)
-        }.sorted { $0.distance < $1.distance }
+            return .init(name: name, distance: position.distance(from: location),
+                         isLandmark: isLandmark(item.pointOfInterestCategory, name: name))
+        }
 
-        let result: MapPlaceSuggestion?
+        let address: MapPlaceSuggestion.Address?
         do {
             try checkDemand()
-            result = try await reverseGeocode(location)
+            address = try await reverseGeocode(location)
         } catch is CancellationError {
-            guard !Task.isCancelled, !nearby.isEmpty else { throw CancellationError() }
-            result = nil
+            let partial = MapPlaceSuggestion.ranked(points: nearby, address: .init())
+            guard !Task.isCancelled, partial.displayName != nil else { throw CancellationError() }
+            return LookupResponse(partial)
         } catch let error as CLError where error.code == .geocodeFoundNoResult {
-            result = nil
+            address = nil
         } catch let error as MKError where error.code == .placemarkNotFound {
-            result = nil
+            address = nil
         } catch {
             lookupError = error
-            result = nil
+            address = nil
         }
-        var seen: Set<String> = []
-        let names = ((result?.pointOfInterestNames ?? []) + nearby.map(\.name))
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
-        let suggestion = MapPlaceSuggestion(pointOfInterestNames: Array(names.prefix(5)), streetOrArea: result?.streetOrArea,
-                                            district: result?.district, city: result?.city)
-        if suggestion.displayName != nil { return LookupResponse(suggestion, shouldBackOff: lookupError != nil) }
+        let suggestion = MapPlaceSuggestion.ranked(points: nearby, address: address ?? .init())
+        if !suggestion.candidates.isEmpty { return LookupResponse(suggestion, shouldBackOff: lookupError != nil) }
         if let lookupError { throw lookupError }
         return LookupResponse(nil)
     }
 
-    private static func reverseGeocode(_ location: CLLocation) async throws -> MapPlaceSuggestion? {
+    private static func isLandmark(_ category: MKPointOfInterestCategory?, name: String) -> Bool {
+        if let category, [.museum, .nationalPark, .park, .amusementPark, .stadium].contains(category) { return true }
+        if #available(iOS 18.0, macOS 15.0, *), let category,
+           [.landmark, .nationalMonument, .castle, .fairground].contains(category) { return true }
+        // MapKit has no dedicated shopping-center category.
+        let normalized = name.lowercased()
+        return ["购物中心", "购物广场", "商业中心", "商业广场", "商场", " mall", "shopping center", "shopping centre"]
+            .contains { normalized.hasSuffix($0) }
+    }
+
+    private static func reverseGeocode(_ location: CLLocation) async throws -> MapPlaceSuggestion.Address? {
         if #available(iOS 26.0, macOS 26.0, *) {
             guard let request = MKReverseGeocodingRequest(location: location),
                   let item = try await request.mapItems.first else { return nil }
-            let poi = item.pointOfInterestCategory != nil ? item.name : nil
-            return MapPlaceSuggestion(
-                pointOfInterestNames: [poi].compactMap { $0 },
-                streetOrArea: item.address?.shortAddress,
-                district: nil,
-                city: item.addressRepresentations?.cityName
+            return .init(
+                street: item.address?.shortAddress,
+                city: item.addressRepresentations?.cityName,
+                detailed: item.addressRepresentations?.fullAddress(includingRegion: false, singleLine: true) ?? item.address?.fullAddress
             )
         } else {
             guard let place = try await CLGeocoder().reverseGeocodeLocation(location).first else { return nil }
-            return MapPlaceSuggestion(
-                pointOfInterestNames: place.areasOfInterest ?? [],
-                streetOrArea: place.thoroughfare,
+            return .init(
+                street: place.thoroughfare,
                 district: place.subLocality,
-                city: place.locality
+                city: place.locality,
+                detailed: place.postalAddress?.street
             )
         }
     }

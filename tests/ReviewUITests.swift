@@ -86,7 +86,7 @@ final class ReviewUITests: XCTestCase {
         let consent = app.alerts["开启自动地名？"]
         XCTAssertTrue(consent.waitForExistence(timeout: 5))
         consent.buttons["开启"].tap()
-        let labeledDay = days.matching(NSPredicate(format: "label CONTAINS %@", "测试街市附近")).firstMatch
+        let labeledDay = days.matching(NSPredicate(format: "label CONTAINS %@", "测试街道附近")).firstMatch
         XCTAssertTrue(labeledDay.waitForExistence(timeout: 8))
     }
 

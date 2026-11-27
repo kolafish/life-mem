@@ -95,6 +95,7 @@ struct RouteChecks {
         try await checkInsights(context: context, directory: root)
         try checkPlaceSuggestions(context: context)
         try checkPlaceNames(in: root)
+        try checkRankedPlaceNames()
         try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
         await checkSharedPlaceCancellation(in: root)
@@ -775,6 +776,40 @@ struct RouteChecks {
         try legacy.write(to: unreadableFile)
         unreadable.reload()
         precondition(unreadable.loadIssue == nil && unreadable.name(for: start) == "旧版地点")
+    }
+
+    private static func checkRankedPlaceNames() throws {
+        typealias Point = MapPlaceSuggestion.NearbyPoint
+        let cafe = Point(name: "合成咖啡店", distance: 21, isLandmark: false)
+        let competitor = Point(name: "合成便利店", distance: 29, isLandmark: false)
+        let fartherStore = Point(name: "远处的商店", distance: 80, isLandmark: false)
+        let mall = Point(name: "城市购物中心", distance: 155, isLandmark: true)
+        let outside = Point(name: "范围外的公园", distance: 205, isLandmark: true)
+        let address = MapPlaceSuggestion.Address(street: "合成路", district: "测试街区", city: "测试城市", detailed: "合成路 18 号")
+
+        let clear = MapPlaceSuggestion.ranked(points: [fartherStore, cafe, mall], address: address)
+        precondition(clear.displayName == "合成咖啡店附近")
+        precondition(clear.candidates.contains("合成路 18 号") && clear.candidates.contains("城市购物中心附近"))
+        precondition(!clear.candidates.contains("远处的商店"))
+
+        let ambiguous = MapPlaceSuggestion.ranked(points: [competitor, cafe, mall], address: address)
+        precondition(ambiguous.displayName == "合成路附近")
+        precondition(ambiguous.candidates.contains("合成咖啡店") && ambiguous.candidates.contains("合成便利店"))
+        let manualOnly = MapPlaceSuggestion.ranked(points: [competitor, cafe], address: .init())
+        precondition(manualOnly.displayName == nil && manualOnly.candidates.count == 2)
+
+        let landmark = MapPlaceSuggestion.ranked(points: [outside, fartherStore, mall], address: .init(city: "测试城市"))
+        precondition(landmark.displayName == "城市购物中心附近" && !landmark.candidates.contains("范围外的公园附近"))
+        let district = MapPlaceSuggestion.ranked(points: [mall], address: .init(street: " ", district: "测试街区"))
+        precondition(district.displayName == "测试街区附近")
+        let empty = MapPlaceSuggestion.ranked(points: [outside, fartherStore], address: .init())
+        precondition(empty.displayName == nil && empty.candidates.isEmpty)
+
+        let cached = try JSONDecoder().decode(MapPlaceSuggestion.self, from: JSONEncoder().encode(ambiguous))
+        precondition(cached.displayName == ambiguous.displayName && cached.candidates == ambiguous.candidates)
+        let old = Data(#"{"pointOfInterestNames":["旧版地点"],"streetOrArea":"旧版街道"}"#.utf8)
+        let legacy = try JSONDecoder().decode(MapPlaceSuggestion.self, from: old)
+        precondition(legacy.displayName == "旧版地点附近" && legacy.candidates.contains("旧版街道附近"))
     }
 
     @MainActor

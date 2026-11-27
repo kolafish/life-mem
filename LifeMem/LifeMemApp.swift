@@ -31,7 +31,10 @@ struct LifeMemApp: App {
         let lookup: PlaceResolver.Lookup?
         #if DEBUG && targetEnvironment(simulator)
         lookup = ReviewTestFixture.scenario == "prefetch" ? { _, _ in
-            .init(MapPlaceSuggestion(pointOfInterestNames: ["测试街市"], streetOrArea: nil, district: nil, city: nil))
+            .init(.ranked(points: [
+                .init(name: "测试咖啡店", distance: 15, isLandmark: false),
+                .init(name: "测试便利店", distance: 22, isLandmark: false)
+            ], address: .init(street: "测试街道")))
         } : nil
         #else
         lookup = nil
