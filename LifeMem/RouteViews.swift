@@ -23,6 +23,11 @@ struct RouteHistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !placeResolver.hasSeenAutomaticIntroduction, !placeResolver.isAutomaticEnabled,
+               placeNames.loadIssue == nil, let review,
+               review.places.contains(where: { placeResolver.label(near: $0.coordinate, names: placeNames) == nil }) {
+                automaticIntroduction
+            }
             if hasRoutes {
                 ReviewModePicker(selection: $mode)
             }
@@ -41,6 +46,9 @@ struct RouteHistoryView: View {
                         Button("关闭自动地名", systemImage: "mappin.slash") {
                             placeResolver.setAutomaticEnabled(false)
                         }
+                        if !placeResolver.isPrefetchEnabled {
+                            Button("提前准备地名", systemImage: "mappin.and.ellipse") { confirmsAutomaticLookup = true }
+                        }
                     } else {
                         Button("开启自动地名", systemImage: "mappin.and.ellipse") {
                             confirmsAutomaticLookup = true
@@ -55,10 +63,13 @@ struct RouteHistoryView: View {
             }
         }
         .alert("开启自动地名？", isPresented: $confirmsAutomaticLookup) {
-            Button("开启") { placeResolver.setAutomaticEnabled(true) }
+            Button("开启") {
+                placeResolver.dismissAutomaticIntroduction()
+                placeResolver.setAutomaticEnabled(true, includesPrefetch: true)
+            }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("打开回顾时，系统地图会使用未命名停留的中心坐标查找附近地名。可以随时在回顾选项里关闭。")
+            Text("App 在前台时，Apple 地图会使用未命名停留的中心坐标查找地名，包括提前准备最近的停留地点。可以随时在回顾选项里关闭。")
         }
         .alert("清除地名建议缓存？", isPresented: $confirmsCacheRemoval) {
             Button("清除", role: .destructive) {
@@ -80,6 +91,33 @@ struct RouteHistoryView: View {
         .sheet(isPresented: $showsArchive) {
             NavigationStack { RouteArchiveView(recorder: recorder) }
         }
+    }
+
+    private var automaticIntroduction: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("为停留显示地名").font(.headline)
+            Text("允许 Apple 地图查找附近地名，下次回顾时可以直接看到。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { introductionActions }
+                VStack(alignment: .leading, spacing: 0) { introductionActions }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var introductionActions: some View {
+        Button { confirmsAutomaticLookup = true } label: {
+            Text("开启自动地名").frame(minHeight: 44)
+        }
+        Button { placeResolver.dismissAutomaticIntroduction() } label: {
+            Text("以后再说").frame(minHeight: 44)
+        }
+        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -193,11 +231,13 @@ private struct RoutePlaceReviewView: View {
     let days: [RouteReviewDay]
     var suggestedCategory: PlaceCategory? = nil
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @State private var namingTarget: PlaceNamingTarget?
 
     var body: some View {
+        let canLookUp = scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
         let name = placeResolver.label(near: place.coordinate, names: placeNames)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
@@ -243,8 +283,8 @@ private struct RoutePlaceReviewView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(name ?? "停留地点")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil) {
-            guard suggestedCategory == nil, placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
+        .task(id: canLookUp) {
+            guard canLookUp else { return }
             await placeResolver.resolveAutomatically(near: place.coordinate, names: placeNames)
         }
         .sheet(item: $namingTarget) { target in
@@ -260,6 +300,7 @@ private struct RoutePlaceReviewView: View {
 private struct RouteDayReviewView: View {
     let day: RouteReviewDay
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -287,6 +328,7 @@ private struct RouteDayReviewView: View {
     }
 
     var body: some View {
+        let canLookUp = scenePhase == .active && allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil
         let selected = day.entries.first { $0.id == selection.id }
         ScrollViewReader { proxy in
             ScrollView {
@@ -342,12 +384,9 @@ private struct RouteDayReviewView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil) {
-            guard allowsAutomaticLookup, placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
-            for coordinate in day.entries.compactMap(\.visitCoordinate) {
-                guard !Task.isCancelled else { return }
-                await placeResolver.resolveAutomatically(near: coordinate, names: placeNames)
-            }
+        .task(id: canLookUp) {
+            guard canLookUp else { return }
+            await placeResolver.resolveAutomatically(near: day.entries.compactMap(\.visitCoordinate), names: placeNames)
         }
         .sheet(item: $namingTarget) { target in
             PlaceNamingView(

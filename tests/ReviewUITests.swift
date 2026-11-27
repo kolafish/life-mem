@@ -67,6 +67,29 @@ final class ReviewUITests: XCTestCase {
         }
     }
 
+    func testAutomaticPlaceIntroductionAndPrefetch() {
+        let app = launch(fixture: "prefetch")
+        app.tabBars.buttons["回顾"].tap()
+        let intro = app.staticTexts["为停留显示地名"]
+        XCTAssertTrue(intro.waitForExistence(timeout: 8))
+        app.buttons["以后再说"].tap()
+        XCTAssertFalse(intro.exists)
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["回顾"].tap()
+        let days = app.descendants(matching: .any).matching(identifier: "review-day")
+        XCTAssertTrue(days.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertFalse(intro.exists)
+
+        app.buttons["回顾选项"].tap()
+        app.buttons["开启自动地名"].tap()
+        let consent = app.alerts["开启自动地名？"]
+        XCTAssertTrue(consent.waitForExistence(timeout: 5))
+        consent.buttons["开启"].tap()
+        let labeledDay = days.matching(NSPredicate(format: "label CONTAINS %@", "测试街市附近")).firstMatch
+        XCTAssertTrue(labeledDay.waitForExistence(timeout: 8))
+    }
+
     func testAnalyticsPeriodAndRanking() {
         let app = launch(fixture: "day")
         app.tabBars.buttons["分析"].tap()
