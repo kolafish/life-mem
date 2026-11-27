@@ -52,7 +52,7 @@ struct RouteChecks {
         precondition(points.map(\.mode) == [.walking, .walking, .automotive])
         precondition(points.map(\.startsNewSegment) == [true, false, true])
         precondition(abs(route.distanceMeters - nearby.distance(from: first)) < 0.01)
-        let savedSegments = RouteActivitySegment.group(sortedPoints: points)
+        let savedSegments = SegmentBuilder.group(sortedPoints: points.map(\.locationPoint))
         precondition(savedSegments.map(\.mode) == [.walking, .automotive])
         precondition(savedSegments.map(\.startedAt) == [first.timestamp, afterGap.timestamp])
         precondition(savedSegments.map(\.endedAt) == [nearby.timestamp, afterGap.timestamp])
@@ -79,12 +79,13 @@ struct RouteChecks {
         context.insert(RoutePoint(location: stayEnd, mode: .stationary, startsNewSegment: false, route: newRoute))
         newRoute.pointCount += 2
         try context.save()
-        let segments = RouteActivitySegment.group(sortedPoints: newRoute.points.sorted { $0.timestamp < $1.timestamp })
+        let segments = SegmentBuilder.group(sortedPoints: newRoute.points.sorted { $0.timestamp < $1.timestamp }.map(\.locationPoint))
         precondition(segments.map(\.mode) == [.unknown, .cycling, .stationary])
         precondition(segments[1].startedAt == farther.timestamp && segments[1].startCoordinate.longitude == farther.coordinate.longitude)
         precondition(segments[1].coordinates.count == 2)
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
+        checkPureSegmentBuilder(at: start)
         try checkReview(context: context)
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
@@ -92,6 +93,22 @@ struct RouteChecks {
         try checkPlaceNames(in: root)
         try await checkPlaceResolver(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+    }
+
+    private static func checkPureSegmentBuilder(at start: Date) {
+        let points = (0...16).map { index in
+            LocationPoint(id: index, timestamp: start.addingTimeInterval(Double(index) * 30),
+                          coordinate: .init(latitude: 0, longitude: 0), accuracy: 5,
+                          mode: .unknown, startsNewSegment: index == 0, startsRecordingRun: index == 0)
+        }
+        let split = LocationPoint(id: 17, timestamp: start.addingTimeInterval(540),
+                                  coordinate: .init(latitude: 0, longitude: 0.001), accuracy: 5,
+                                  mode: .walking, startsNewSegment: true, startsRecordingRun: true)
+        let runs = SegmentBuilder.build([split] + points.reversed())
+        precondition(runs.count == 2 && runs.allSatisfy { $0.count == 1 })
+        precondition(runs[0][0].visitCoordinate?.longitude == 0)
+        precondition(runs[0][0].points.first?.id == 0 && runs[0][0].points.last?.id == 16)
+        precondition(runs[1][0].visitCoordinate == nil && runs[1][0].points.first?.id == 17)
     }
 
     @MainActor

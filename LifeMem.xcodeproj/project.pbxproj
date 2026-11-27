@@ -22,6 +22,12 @@
 		AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000302 /* TimelineSegmentRow.swift */; };
 		AA0000000000000000000403 /* DayPickerHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000303 /* DayPickerHeader.swift */; };
 		AA0000000000000000000404 /* RoutePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000304 /* RoutePresentation.swift */; };
+		AA0000000000000000000410 /* LocationPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000310 /* LocationPoint.swift */; };
+		AA0000000000000000000411 /* RouteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000311 /* RouteModels.swift */; };
+		AA0000000000000000000412 /* SegmentBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000312 /* SegmentBuilder.swift */; };
+		AA0000000000000000000413 /* TimelineSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000313 /* TimelineSegment.swift */; };
+		AA0000000000000000000414 /* SavedPlace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000314 /* SavedPlace.swift */; };
+		AA0000000000000000000415 /* RouteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000315 /* RouteStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,6 +60,12 @@
 		AA0000000000000000000302 /* TimelineSegmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSegmentRow.swift; sourceTree = "<group>"; };
 		AA0000000000000000000303 /* DayPickerHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPickerHeader.swift; sourceTree = "<group>"; };
 		AA0000000000000000000304 /* RoutePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePresentation.swift; sourceTree = "<group>"; };
+		AA0000000000000000000310 /* LocationPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPoint.swift; sourceTree = "<group>"; };
+		AA0000000000000000000311 /* RouteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteModels.swift; sourceTree = "<group>"; };
+		AA0000000000000000000312 /* SegmentBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentBuilder.swift; sourceTree = "<group>"; };
+		AA0000000000000000000313 /* TimelineSegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSegment.swift; sourceTree = "<group>"; };
+		AA0000000000000000000314 /* SavedPlace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPlace.swift; sourceTree = "<group>"; };
+		AA0000000000000000000315 /* RouteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -74,6 +86,12 @@
 				AA0000000000000000000003 /* RouteRecorder.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000315 /* RouteStore.swift */,
+				AA0000000000000000000314 /* SavedPlace.swift */,
+				AA0000000000000000000313 /* TimelineSegment.swift */,
+				AA0000000000000000000312 /* SegmentBuilder.swift */,
+				AA0000000000000000000311 /* RouteModels.swift */,
+				AA0000000000000000000310 /* LocationPoint.swift */,
 				AA0000000000000000000304 /* RoutePresentation.swift */,
 				AA0000000000000000000303 /* DayPickerHeader.swift */,
 				AA0000000000000000000302 /* TimelineSegmentRow.swift */,
@@ -155,6 +173,12 @@
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+				AA0000000000000000000415 /* RouteStore.swift in Sources */,
+				AA0000000000000000000414 /* SavedPlace.swift in Sources */,
+				AA0000000000000000000413 /* TimelineSegment.swift in Sources */,
+				AA0000000000000000000412 /* SegmentBuilder.swift in Sources */,
+				AA0000000000000000000411 /* RouteModels.swift in Sources */,
+				AA0000000000000000000410 /* LocationPoint.swift in Sources */,
 				AA0000000000000000000404 /* RoutePresentation.swift in Sources */,
 				AA0000000000000000000403 /* DayPickerHeader.swift in Sources */,
 				AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */,

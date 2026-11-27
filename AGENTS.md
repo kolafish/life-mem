@@ -6,13 +6,15 @@ Life Mem 是面向 iPhone 的路线记录 App，最低支持 iOS 17。日常开�
 
 | 路径 | 职责 |
 | --- | --- |
-| `LifeMem/LifeMemApp.swift` | 应用入口、SwiftData 容器初始化和顶层导航 |
-| `LifeMem/Routes.swift` | 路线与定位点模型、采样规则、活动分段与地点分组 |
+| `LifeMem/LifeMemApp.swift`、`LifeMem/RouteStore.swift` | 应用入口、顶层导航和本机 SwiftData 容器 |
+| `LifeMem/RouteModels.swift`、`LifeMem/LocationPoint.swift` | SwiftData 路线模型、值类型定位点和采样规则 |
+| `LifeMem/SegmentBuilder.swift`、`LifeMem/TimelineSegment.swift`、`LifeMem/Routes.swift` | 活动分段、时间轴数据、按日投影与地点分组 |
+| `LifeMem/SavedPlace.swift` | 本机地点别名及分类 |
 | `LifeMem/RouteRecorder.swift` | 记录状态、系统定位与运动回调、保存和中断恢复 |
 | `LifeMem/RecordView.swift`、`LifeMem/RouteViews.swift` | 记录、历史与地图界面 |
 | `tests/RouteChecks.swift` | 可在 Mac 上运行的路线逻辑与持久化回归检查 |
 
-- 视图调用记录器执行采集操作。采样、分段和分组规则集中在 `Routes.swift`，保证界面和检查程序使用同一套逻辑。
+- 视图调用记录器执行采集操作。采样和分段由 `LocationPoint.swift` 与 `SegmentBuilder.swift` 提供，按日投影和地点分组集中在 `Routes.swift`，保证界面和检查程序使用同一套逻辑。
 - Swift 沿用现有风格。使用四空格缩进，类型用 `UpperCamelCase`，方法和属性用 `lowerCamelCase`。将仅供内部使用的成员和辅助类型标为 `private`。采样阈值变更时同步更新 README 中对应的说明。
 - 优先使用已有实现和系统框架。引入新依赖、拆分模块或提高最低系统版本时，在变更说明里写明原因及影响。
 

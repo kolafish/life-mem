@@ -48,7 +48,9 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ```sh
 mkdir -p DerivedData
-xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift LifeMem/RouteAnalytics.swift LifeMem/RouteBehavior.swift tests/RouteChecks.swift -o DerivedData/route-checks
+xcrun swiftc -parse-as-library \
+  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,SavedPlace,PlaceResolver,RouteAnalytics,RouteBehavior}.swift \
+  tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```
 
