@@ -37,6 +37,10 @@ enum PlaceCategory: String, CaseIterable, Codable, Identifiable {
 @MainActor
 @Observable
 final class RoutePlaceNames {
+    enum LoadIssue: Error {
+        case unreadable, damaged
+    }
+
     private struct SavedPlace: Codable {
         var name: String
         var category: PlaceCategory?
@@ -48,18 +52,39 @@ final class RoutePlaceNames {
 
     private let file: URL
     private var names: [SavedPlace] = []
-    private let loadError: Error?
+    private(set) var loadIssue: LoadIssue?
 
     init(file: URL) {
         self.file = file
+        reload()
+    }
+
+    func reload() {
         do {
             names = try JSONDecoder().decode([SavedPlace].self, from: Data(contentsOf: file))
-            loadError = nil
+            loadIssue = nil
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            loadError = nil
+            names = []
+            loadIssue = nil
         } catch {
-            loadError = error
+            loadIssue = error is DecodingError ? .damaged : .unreadable
         }
+    }
+
+    func rebuildDamagedFile() throws {
+        guard loadIssue == .damaged else { return }
+        let original = try Data(contentsOf: file)
+        if let recovered = try? JSONDecoder().decode([SavedPlace].self, from: original) {
+            names = recovered
+            loadIssue = nil
+            return
+        }
+
+        let stem = file.deletingPathExtension().lastPathComponent
+        let backup = file.deletingLastPathComponent().appending(path: "\(stem)-damaged-\(UUID().uuidString).json")
+        try original.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try write([])
+        loadIssue = nil
     }
 
     func name(for coordinate: CLLocationCoordinate2D) -> String? {
@@ -75,7 +100,7 @@ final class RoutePlaceNames {
     }
 
     func save(_ name: String?, category: PlaceCategory? = nil, for coordinate: CLLocationCoordinate2D) throws {
-        if let loadError { throw loadError }
+        if let loadIssue { throw loadIssue }
         var updated = names
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if let index = matchingIndex(for: coordinate) {
@@ -90,6 +115,10 @@ final class RoutePlaceNames {
         } else {
             return
         }
+        try write(updated)
+    }
+
+    private func write(_ updated: [SavedPlace]) throws {
         let data = try JSONEncoder().encode(updated)
         try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         names = updated

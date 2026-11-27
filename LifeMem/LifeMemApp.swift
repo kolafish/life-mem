@@ -38,7 +38,7 @@ struct LifeMemApp: App {
             #endif
             let container = try RouteStore.open(directory: Self.storageDirectory)
             #if DEBUG && targetEnvironment(simulator)
-            if shouldSeed { try ReviewTestFixture.seed(context: container.mainContext, names: names) }
+            if shouldSeed { try ReviewTestFixture.seed(context: container.mainContext, names: names, directory: Self.storageDirectory) }
             #endif
             return container
         }
@@ -140,7 +140,7 @@ private enum ReviewTestFixture {
     static let storageID = ProcessInfo.processInfo.environment["LIFEMEM_UI_TEST_STORAGE_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
 
     @MainActor
-    static func seed(context: ModelContext, names: RoutePlaceNames) throws {
+    static func seed(context: ModelContext, names: RoutePlaceNames, directory: URL) throws {
         if scenario == "suggestions" {
             try seedSuggestions(context: context)
             return
@@ -174,7 +174,7 @@ private enum ReviewTestFixture {
             try context.save()
             return
         }
-        guard scenario == "day" else { return }
+        guard scenario == "day" || scenario == "damaged-names" else { return }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         for daysAgo in 0...1 {
@@ -215,8 +215,13 @@ private enum ReviewTestFixture {
                 add(seconds, offset: 0, mode: .stationary)
             }
         }
-        try names.save("测试之家", category: .home, for: .init(latitude: 37.3317, longitude: -122.0307))
-        try names.save("测试办公室", category: .work, for: .init(latitude: 37.3317, longitude: -122.0202))
+        if scenario == "damaged-names" {
+            try Data("incomplete".utf8).write(to: directory.appending(path: "place-names.json"))
+            names.reload()
+        } else {
+            try names.save("测试之家", category: .home, for: .init(latitude: 37.3317, longitude: -122.0307))
+            try names.save("测试办公室", category: .work, for: .init(latitude: 37.3317, longitude: -122.0202))
+        }
         try context.save()
     }
 
