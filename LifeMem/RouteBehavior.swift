@@ -66,9 +66,13 @@ struct RouteBehavior {
     let routine: [RoutinePoint]
 
     init(review: RouteReview, range: ClosedRange<Date>, calendar: Calendar, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
+        self.init(summary: RouteSummary(review: review), range: range, calendar: calendar, category: category)
+    }
+
+    init(summary: RouteSummary, range: ClosedRange<Date>, calendar: Calendar, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
         var trips: [RoutePattern] = []
         var homeTimes: [RoutinePoint.ID: Date] = [:]
-        for journey in review.journeys.sorted(by: { $0.departedAt < $1.departedAt }) {
+        for journey in summary.journeys.sorted(by: { $0.departedAt < $1.departedAt }) {
             for (kind, connection) in [(RoutineKind.departure, journey.departureStay), (.arrival, journey.arrivalStay)] {
                 guard let connection, category(connection.coordinate) == .home else { continue }
                 let date = calendar.startOfDay(for: connection.time)

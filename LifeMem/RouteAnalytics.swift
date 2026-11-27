@@ -63,9 +63,13 @@ struct RouteAnalytics {
     let places: [PlaceRank]
 
     init(review: RouteReview, range: ClosedRange<Date>, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
+        self.init(summary: RouteSummary(review: review), range: range, category: category)
+    }
+
+    init(summary: RouteSummary, range: ClosedRange<Date>, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
         var totals: [RouteTimeUse: TimeInterval] = [:]
         var durationByVisit: [RouteVisit.ID: TimeInterval] = [:]
-        days = review.days.reversed().filter { range.contains($0.date) }.map { day in
+        days = summary.days.reversed().filter { range.contains($0.date) }.map { day in
             var recorded: [RouteTimeUse: TimeInterval] = [.moving: day.movingDuration]
             for stay in day.stays where stay.duration > 0 {
                 recorded[RouteTimeUse(category: category(stay.coordinate)), default: 0] += stay.duration
@@ -75,7 +79,7 @@ struct RouteAnalytics {
             return Day(date: day.date, time: Self.buckets(recorded))
         }
         time = Self.buckets(totals)
-        places = review.places.compactMap { place in
+        places = summary.places.compactMap { place in
             let visitDurations = place.visits.compactMap { durationByVisit[$0.id] }
             guard !visitDurations.isEmpty else { return nil }
             return PlaceRank(place: place, visits: visitDurations.count, seconds: visitDurations.reduce(0, +))

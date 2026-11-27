@@ -3,7 +3,7 @@ import SwiftData
 import SwiftUI
 
 struct AnalyticsView: View {
-    let review: RouteReview?
+    let summary: RouteSummary?
 
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var names
@@ -35,8 +35,8 @@ struct AnalyticsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 periodSelector
-                if let review {
-                    let data = RouteAnalytics(review: review, range: dateRange, category: names.category(for:))
+                if let summary {
+                    let data = RouteAnalytics(summary: summary, range: dateRange, category: names.category(for:))
                     if data.time.isEmpty {
                         ContentUnavailableView(
                             "这段时间暂无统计",
@@ -46,7 +46,7 @@ struct AnalyticsView: View {
                     } else {
                         timeAllocation(data)
                         if !data.places.isEmpty { topPlaces(data) }
-                        behaviorCards(RouteBehavior(review: review, range: dateRange, calendar: calendar, category: names.category(for:)))
+                        behaviorCards(RouteBehavior(summary: summary, range: dateRange, calendar: calendar, category: names.category(for:)))
                     }
                 } else {
                     ProgressView().frame(maxWidth: .infinity)

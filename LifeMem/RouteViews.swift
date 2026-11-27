@@ -5,6 +5,7 @@ import SwiftUI
 struct RouteHistoryView: View {
     let review: RouteReview?
     let hasRoutes: Bool
+    let summaryIndex: RouteSummaryIndex
 
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -79,7 +80,7 @@ struct RouteHistoryView: View {
             Text("请检查设备的可用存储空间后重试。")
         }
         .sheet(isPresented: $showsArchive) {
-            NavigationStack { RouteArchiveView() }
+            NavigationStack { RouteArchiveView(summaryIndex: summaryIndex) }
         }
     }
 
@@ -357,12 +358,15 @@ struct RouteDetailView: View {
 }
 
 private struct RouteArchiveView: View {
+    let summaryIndex: RouteSummaryIndex
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
     @State private var routeToDelete: RecordedRoute?
     @State private var deleteFailed = false
+    @State private var isDeleting = false
 
     var body: some View {
         Group {
@@ -400,7 +404,7 @@ private struct RouteArchiveView: View {
             get: { routeToDelete != nil },
             set: { if !$0 { routeToDelete = nil } }
         ), titleVisibility: .visible, presenting: routeToDelete) { route in
-            Button("删除路线", role: .destructive) { delete(route) }
+            Button("删除路线", role: .destructive) { Task { await delete(route) } }
             Button("取消", role: .cancel) {}
         } message: { _ in
             Text("这条路线及其所有日期的定位点将从手机中删除。")
@@ -408,13 +412,23 @@ private struct RouteArchiveView: View {
         .alert("暂时无法删除路线", isPresented: $deleteFailed) { Button("好", role: .cancel) {} }
     }
 
-    private func delete(_ route: RecordedRoute) {
-        guard route.isFinished else { return }
+    private func delete(_ route: RecordedRoute) async {
+        guard route.isFinished, !isDeleting else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+        let id = route.id
+        do {
+            try await summaryIndex.prepareToDelete(routeID: id)
+        } catch {
+            deleteFailed = true
+            return
+        }
         context.delete(route)
         do {
             try context.save()
         } catch {
             context.rollback()
+            await summaryIndex.cancelDeletion(routeID: id)
             deleteFailed = true
         }
     }
