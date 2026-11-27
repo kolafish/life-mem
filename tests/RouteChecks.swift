@@ -429,9 +429,9 @@ struct RouteChecks {
         let neighbor = CLLocationCoordinate2D(latitude: 0, longitude: 0.00012)
         let anotherPlace = CLLocationCoordinate2D(latitude: 0, longitude: 0.01)
         var requests = 0
-        let resolver = PlaceResolver(file: file, defaults: defaults) { _ in
+        let resolver = PlaceResolver(file: file, defaults: defaults) { _, _ in
             requests += 1
-            return MapPlaceSuggestion(pointOfInterestNames: ["市图书馆"], streetOrArea: "书院路", district: nil, city: nil)
+            return .init(MapPlaceSuggestion(pointOfInterestNames: ["市图书馆"], streetOrArea: "书院路", district: nil, city: nil))
         }
         await resolver.resolveAutomatically(near: place, names: names)
         precondition(requests == 0)
@@ -446,13 +446,92 @@ struct RouteChecks {
         precondition(requests == 1)
         precondition(resolver.label(near: neighbor, names: names) == "最喜欢的图书馆")
         resolver.setAutomaticEnabled(false)
-        let reopened = PlaceResolver(file: file, defaults: defaults) { _ in nil }
+        let reopened = PlaceResolver(file: file, defaults: defaults) { _, _ in .init(nil) }
         precondition(!reopened.isAutomaticEnabled)
         precondition(reopened.cached(near: neighbor)?.candidates == ["市图书馆", "书院路附近"])
         try reopened.clearCache()
-        let cleared = PlaceResolver(file: file, defaults: defaults) { _ in nil }
+        let cleared = PlaceResolver(file: file, defaults: defaults) { _, _ in .init(nil) }
         precondition(cleared.cached(near: neighbor) == nil)
         precondition(cleared.label(near: neighbor, names: names) == "最喜欢的图书馆")
+
+        let clock = ContinuousClock()
+        var starts: [ContinuousClock.Instant] = []
+        let coordinated = PlaceResolver(file: file, defaults: defaults, minimumInterval: .milliseconds(40)) { _, _ in
+            starts.append(clock.now)
+            try await Task.sleep(for: .milliseconds(20))
+            return .init(MapPlaceSuggestion(pointOfInterestNames: ["合成地名"], streetOrArea: nil, district: nil, city: nil))
+        }
+        coordinated.setAutomaticEnabled(true)
+        async let automatic = coordinated.resolve(near: place, automatic: true)
+        async let manual = coordinated.resolve(near: neighbor, automatic: false)
+        async let distinct = coordinated.resolve(near: anotherPlace, automatic: false)
+        for result in await [automatic, manual, distinct] {
+            precondition(result?.displayName == "合成地名附近")
+        }
+        precondition(starts.count == 2 && starts[0].duration(to: starts[1]) >= .milliseconds(40))
+
+        enum LookupFailure: Error { case unavailable }
+        var attempts = 0
+        let failed = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero, initialBackoff: .milliseconds(200)) { _, _ in
+            attempts += 1
+            if attempts == 1 { throw LookupFailure.unavailable }
+            return .init(nil)
+        }
+        let uncached = CLLocationCoordinate2D(latitude: 0, longitude: 1)
+        let anotherUncached = CLLocationCoordinate2D(latitude: 0, longitude: 2)
+        _ = await failed.resolve(near: uncached, automatic: false)
+        _ = await failed.resolve(near: anotherUncached, automatic: false)
+        precondition(attempts == 1)
+        let cachedOffline = await failed.resolve(near: place, automatic: false)
+        precondition(cachedOffline?.displayName == "合成地名附近")
+        try await Task.sleep(for: .milliseconds(220))
+        _ = await failed.resolve(near: uncached, automatic: false)
+        _ = await failed.resolve(near: anotherUncached, automatic: false)
+        precondition(attempts == 3, "A completed lookup with no match must not trigger network backoff.")
+
+        var partialAttempts = 0
+        let partial = PlaceResolver(file: directory.appending(path: "partial-suggestions.json"), defaults: defaults) { _, _ in
+            partialAttempts += 1
+            let suggestion = MapPlaceSuggestion(pointOfInterestNames: ["附近地名"], streetOrArea: nil, district: nil, city: nil)
+            return .init(suggestion, shouldBackOff: true)
+        }
+        let partialResult = await partial.resolve(near: uncached, automatic: false)
+        _ = await partial.resolve(near: anotherUncached, automatic: false)
+        precondition(partialResult != nil && partialAttempts == 1)
+        precondition(partial.cached(near: uncached) != nil)
+
+        var finish: CheckedContinuation<Void, Never>?
+        var furtherRequests = 0
+        let clearing = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero) { _, checkDemand in
+            await withCheckedContinuation { finish = $0 }
+            try checkDemand()
+            furtherRequests += 1
+            return .init(MapPlaceSuggestion(pointOfInterestNames: ["过期结果"], streetOrArea: nil, district: nil, city: nil))
+        }
+        let pending = Task { await clearing.resolve(near: uncached, automatic: false) }
+        while finish == nil { await Task.yield() }
+        try clearing.clearCache()
+        finish?.resume()
+        let clearedPending = await pending.value
+        precondition(clearedPending == nil && clearing.cached(near: uncached) == nil)
+
+        finish = nil
+        let automaticPending = Task { await clearing.resolve(near: anotherUncached, automatic: true) }
+        while finish == nil { await Task.yield() }
+        clearing.setAutomaticEnabled(false)
+        clearing.setAutomaticEnabled(true)
+        finish?.resume()
+        let revokedPending = await automaticPending.value
+        precondition(revokedPending == nil && clearing.cached(near: anotherUncached) == nil)
+
+        finish = nil
+        let cancelled = Task { await clearing.resolve(near: uncached, automatic: false) }
+        while finish == nil { await Task.yield() }
+        finish?.resume()
+        cancelled.cancel()
+        let cancelledResult = await cancelled.value
+        precondition(cancelledResult == nil && clearing.cached(near: uncached) == nil)
+        precondition(furtherRequests == 0, "Revoked demand must not start a fallback network request.")
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)
