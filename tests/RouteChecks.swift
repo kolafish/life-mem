@@ -86,6 +86,7 @@ struct RouteChecks {
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
         try checkReview(context: context)
+        try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
         try checkPlaceNames(in: root)
@@ -293,6 +294,41 @@ struct RouteChecks {
         let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day) { _ in nil }
         precondition(ranked.topPlaces(by: .visits).first?.visits == 2)
         precondition(ranked.topPlaces(by: .duration).first?.seconds == 1_200)
+    }
+
+    @MainActor
+    private static func checkRouteReviewCache(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_006_400))
+        let nextDate = calendar.date(byAdding: .day, value: 1, to: date)!
+        let walk = insertRoute(context: context, start: date.addingTimeInterval(23 * 3_600), samples: [
+            (0, 0, .walking, true), (30, 0.0003, .walking, false)
+        ])
+        let stay = insertRoute(context: context, start: nextDate.addingTimeInterval(3_600), samples: stop(start: 0, longitude: 0.01))
+        try context.save()
+
+        let cache = RouteReviewCache()
+        let original = cache.review(routes: [walk, stay], calendar: calendar)
+        precondition(original.days.map(\.date) == [nextDate, date] && original.days[1].movingDuration == 30)
+        let secondReader = cache.review(routes: [walk, stay], calendar: calendar)
+        precondition(secondReader.days.flatMap(\.entries).map(\.id) == original.days.flatMap(\.entries).map(\.id))
+
+        let fix = location(longitude: 0.0006, at: walk.startedAt.addingTimeInterval(60))
+        context.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: false, startsRecordingRun: false, route: walk))
+        walk.pointCount += 1
+        try context.save()
+        let afterAppend = cache.review(routes: [walk, stay], calendar: calendar)
+        precondition(afterAppend.days[1].movingDuration == 60)
+        precondition(afterAppend.places[0].visits[0].id == original.places[0].visits[0].id)
+
+        context.delete(walk)
+        try context.save()
+        let afterDeletion = cache.review(routes: [stay], calendar: calendar)
+        precondition(afterDeletion.days.map(\.date) == [nextDate] && afterDeletion.journeys.isEmpty)
+        calendar.timeZone = TimeZone(secondsFromGMT: -8 * 3_600)!
+        let shifted = cache.review(routes: [stay], calendar: calendar)
+        precondition(shifted.days[0].date == calendar.startOfDay(for: stay.startedAt) && shifted.days[0].date != nextDate)
     }
 
     @MainActor

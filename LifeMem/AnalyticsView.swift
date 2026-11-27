@@ -3,14 +3,12 @@ import SwiftData
 import SwiftUI
 
 struct AnalyticsView: View {
+    let review: RouteReview?
+
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 })
-    private var routes: [RecordedRoute]
-
-    @State private var review: RouteReview?
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
@@ -58,9 +56,6 @@ struct AnalyticsView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
-        .task(id: RouteReviewRevision(calendar: calendar, routes: routes)) {
-            review = RouteReview(routes: routes, calendar: calendar)
-        }
     }
 
     private var dateRange: ClosedRange<Date> {
@@ -91,7 +86,7 @@ struct AnalyticsView: View {
     }
 
     private func timeAllocation(_ data: RouteAnalytics) -> some View {
-        analyticsCard("时间分配") {
+        analyticsCard("已记录时间分配") {
             Chart(data.time) { item in
                 SectorMark(angle: .value("记录时长", item.seconds),
                            innerRadius: .ratio(0.64), angularInset: 1.5)

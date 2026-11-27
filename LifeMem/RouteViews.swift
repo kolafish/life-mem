@@ -3,14 +3,13 @@ import SwiftData
 import SwiftUI
 
 struct RouteHistoryView: View {
+    let review: RouteReview?
+    let hasRoutes: Bool
+
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
-    @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
-    private var routes: [RecordedRoute]
-
     @State private var mode = BrowseMode.timeline
-    @State private var review: RouteReview?
     @State private var showsArchive = false
     @State private var confirmsAutomaticLookup = false
     @State private var confirmsCacheRemoval = false
@@ -22,9 +21,8 @@ struct RouteHistoryView: View {
     }
 
     var body: some View {
-        let routes = routes
         VStack(spacing: 0) {
-            if !routes.isEmpty {
+            if hasRoutes {
                 ReviewModePicker(selection: $mode)
             }
             if let review {
@@ -37,7 +35,7 @@ struct RouteHistoryView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if !routes.isEmpty {
+                    if hasRoutes {
                         Button("管理记录", systemImage: "tray.full") { showsArchive = true }
                     }
                     if placeResolver.isAutomaticEnabled {
@@ -82,9 +80,6 @@ struct RouteHistoryView: View {
         }
         .sheet(isPresented: $showsArchive) {
             NavigationStack { RouteArchiveView() }
-        }
-        .task(id: RouteReviewRevision(calendar: calendar, routes: routes)) {
-            review = RouteReview(routes: routes, calendar: calendar)
         }
     }
 

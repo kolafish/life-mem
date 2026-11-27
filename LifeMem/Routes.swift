@@ -237,17 +237,42 @@ struct RoutePlace: Identifiable {
 }
 
 struct RouteReviewRevision: Hashable {
-    private struct RouteVersion: Hashable {
+    fileprivate struct RouteVersion: Hashable {
         let id: UUID
         let pointCount: Int
     }
 
     let calendar: Calendar
-    private let routes: [RouteVersion]
+    fileprivate let routes: [RouteVersion]
 
     init(calendar: Calendar, routes: [RecordedRoute]) {
         self.calendar = calendar
         self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount) }
+    }
+}
+
+@MainActor
+final class RouteReviewCache {
+    private var revision: RouteReviewRevision?
+    private var contributions: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
+    private var snapshot: RouteReview?
+
+    func review(routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
+        let current = RouteReviewRevision(calendar: calendar, routes: routes)
+        if revision == current, let snapshot { return snapshot }
+        if revision?.calendar != calendar { contributions.removeAll() }
+
+        var retained: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
+        let ordered = zip(routes, current.routes).map { route, version in
+            let value = contributions[version] ?? RouteReview.contribution(for: route, calendar: calendar)
+            retained[version] = value
+            return value
+        }
+        let result = RouteReview(contributions: ordered)
+        contributions = retained
+        revision = current
+        snapshot = result
+        return result
     }
 }
 
@@ -260,95 +285,27 @@ struct RouteReview {
     let places: [RoutePlace]
     let journeys: [RouteJourney]
 
-    init(routes: [RecordedRoute], calendar: Calendar) {
+    fileprivate struct Contribution {
         var entriesByDay: [Date: [RouteReviewEntry]] = [:]
         var midnightMovement: [Date: RouteReviewDay.Movement] = [:]
         var visits: [RouteVisit] = []
         var journeys: [RouteJourney] = []
-        for route in routes {
-            let points = route.points.sorted { $0.timestamp < $1.timestamp }
-            for (index, run) in Self.cleanRuns(points).enumerated() {
-                let slices = Self.timelineSlices(run)
-                for (sliceIndex, slice) in slices.enumerated() {
-                    let first = slice.points[slice.points.startIndex]
-                    let firstDay = calendar.startOfDay(for: first.timestamp)
-                    let lastDay = calendar.startOfDay(for: slice.points[slice.points.endIndex - 1].timestamp)
-                    let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
-                    let last = slice.points[slice.points.endIndex - 1]
-                    let previousSlice = sliceIndex > 0 ? slices[sliceIndex - 1] : nil
-                    let nextSlice = sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
-                    let previousCoordinate = previousSlice?.visitCoordinate
-                    let nextCoordinate = nextSlice?.visitCoordinate
-                    let leading = slice.visitCoordinate == nil && previousCoordinate != nil ? previousSlice?.points.last : nil
-                    let trailing = slice.visitCoordinate == nil && nextCoordinate != nil ? nextSlice?.points.first : nil
-                    if let visit = slice.visitCoordinate {
-                        visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
-                    } else {
-                        if firstDay != lastDay {
-                            for (from, to) in zip(slice.points, slice.points.dropFirst())
-                                where from.mode != .stationary && to.mode != .stationary && !to.startsNewSegment {
-                                Self.allocateMidnightEdge(from: from, to: to, calendar: calendar, totals: &midnightMovement)
-                            }
-                        }
-                        if let from = leading, first.mode != .stationary {
-                            Self.allocateMidnightEdge(from: from, to: first, calendar: calendar, totals: &midnightMovement)
-                        }
-                        if let to = trailing, last.mode != .stationary {
-                            Self.allocateMidnightEdge(from: last, to: to, calendar: calendar, totals: &midnightMovement)
-                        }
-                    }
-                    var completeSegments: [RouteActivitySegment]?
-                    for (day, points) in pointsByDay {
-                        let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
-                        let previousVisit = day == firstDay ? previousCoordinate : nil
-                        let nextVisit = day == lastDay ? nextCoordinate : nil
-                        let sameDayLeading = leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
-                        let sameDayTrailing = trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
-                        let segments = RouteActivitySegment.group(
-                            sortedPoints: points,
-                            inferModes: slice.visitCoordinate == nil,
-                            leadingStayPoint: sameDayLeading,
-                            trailingStayPoint: sameDayTrailing
-                        )
-                        if slice.visitCoordinate == nil, firstDay == lastDay, leading?.timestamp == sameDayLeading?.timestamp,
-                           trailing?.timestamp == sameDayTrailing?.timestamp {
-                            completeSegments = segments
-                        }
-                        let hasMovement = segments.contains { $0.distanceMeters > 0 }
-                        let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
-                        let endpoints = kind == .trip ? Self.endpoints(in: segments, previousVisit: previousVisit, nextVisit: nextVisit) : nil
-                        let stay = slice.visitCoordinate.map { coordinate in
-                            let dayEnd = calendar.dateInterval(of: .day, for: day)?.end ?? last.timestamp
-                            return StayEvent(
-                                id: segments[0].id,
-                                visitID: first.persistentModelID,
-                                coordinate: coordinate,
-                                startedAt: max(day, first.timestamp),
-                                endedAt: min(dayEnd, last.timestamp)
-                            )
-                        }
-                        entriesByDay[day, default: []].append(RouteReviewEntry(
-                            kind: kind,
-                            followsGap: followsGap,
-                            segments: segments,
-                            endpoints: endpoints,
-                            stay: stay
-                        ))
-                    }
+    }
 
-                    if slice.visitCoordinate == nil {
-                        let segments = completeSegments ?? RouteActivitySegment.group(
-                            sortedPoints: Array(slice.points), inferModes: true,
-                            leadingStayPoint: leading, trailingStayPoint: trailing
-                        )
-                        let arrival = trailing.flatMap { point in
-                            nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
-                        }
-                        if let journey = Self.journey(in: segments, departure: previousCoordinate, arrival: arrival) {
-                            journeys.append(journey)
-                        }
-                    }
-                }
+    init(routes: [RecordedRoute], calendar: Calendar) {
+        self.init(contributions: routes.map { Self.contribution(for: $0, calendar: calendar) })
+    }
+
+    fileprivate init(contributions: [Contribution]) {
+        var entriesByDay: [Date: [RouteReviewEntry]] = [:]
+        var midnightMovement: [Date: RouteReviewDay.Movement] = [:]
+        for contribution in contributions {
+            for (date, entries) in contribution.entriesByDay {
+                entriesByDay[date, default: []].append(contentsOf: entries)
+            }
+            for (date, movement) in contribution.midnightMovement {
+                midnightMovement[date, default: .init()].duration += movement.duration
+                midnightMovement[date, default: .init()].distance += movement.distance
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -358,8 +315,97 @@ struct RouteReview {
                 midnightMovement: midnightMovement[date, default: .init()]
             )
         }
-        places = RoutePlace.group(visits, within: Self.placeRadius)
-        self.journeys = journeys
+        places = RoutePlace.group(contributions.flatMap(\.visits), within: Self.placeRadius)
+        journeys = contributions.flatMap(\.journeys)
+    }
+
+    fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
+        var contribution = Contribution()
+        let points = route.points.sorted { $0.timestamp < $1.timestamp }
+        for (index, run) in Self.cleanRuns(points).enumerated() {
+            let slices = Self.timelineSlices(run)
+            for (sliceIndex, slice) in slices.enumerated() {
+                let first = slice.points[slice.points.startIndex]
+                let firstDay = calendar.startOfDay(for: first.timestamp)
+                let lastDay = calendar.startOfDay(for: slice.points[slice.points.endIndex - 1].timestamp)
+                let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
+                let last = slice.points[slice.points.endIndex - 1]
+                let previousSlice = sliceIndex > 0 ? slices[sliceIndex - 1] : nil
+                let nextSlice = sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
+                let previousCoordinate = previousSlice?.visitCoordinate
+                let nextCoordinate = nextSlice?.visitCoordinate
+                let leading = slice.visitCoordinate == nil && previousCoordinate != nil ? previousSlice?.points.last : nil
+                let trailing = slice.visitCoordinate == nil && nextCoordinate != nil ? nextSlice?.points.first : nil
+                if let visit = slice.visitCoordinate {
+                    contribution.visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
+                } else {
+                    if firstDay != lastDay {
+                        for (from, to) in zip(slice.points, slice.points.dropFirst())
+                            where from.mode != .stationary && to.mode != .stationary && !to.startsNewSegment {
+                            Self.allocateMidnightEdge(from: from, to: to, calendar: calendar, totals: &contribution.midnightMovement)
+                        }
+                    }
+                    if let from = leading, first.mode != .stationary {
+                        Self.allocateMidnightEdge(from: from, to: first, calendar: calendar, totals: &contribution.midnightMovement)
+                    }
+                    if let to = trailing, last.mode != .stationary {
+                        Self.allocateMidnightEdge(from: last, to: to, calendar: calendar, totals: &contribution.midnightMovement)
+                    }
+                }
+                var completeSegments: [RouteActivitySegment]?
+                for (day, points) in pointsByDay {
+                    let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
+                    let previousVisit = day == firstDay ? previousCoordinate : nil
+                    let nextVisit = day == lastDay ? nextCoordinate : nil
+                    let sameDayLeading = leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                    let sameDayTrailing = trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                    let segments = RouteActivitySegment.group(
+                        sortedPoints: points,
+                        inferModes: slice.visitCoordinate == nil,
+                        leadingStayPoint: sameDayLeading,
+                        trailingStayPoint: sameDayTrailing
+                    )
+                    if slice.visitCoordinate == nil, firstDay == lastDay, leading?.timestamp == sameDayLeading?.timestamp,
+                       trailing?.timestamp == sameDayTrailing?.timestamp {
+                        completeSegments = segments
+                    }
+                    let hasMovement = segments.contains { $0.distanceMeters > 0 }
+                    let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
+                    let endpoints = kind == .trip ? Self.endpoints(in: segments, previousVisit: previousVisit, nextVisit: nextVisit) : nil
+                    let stay = slice.visitCoordinate.map { coordinate in
+                        let dayEnd = calendar.dateInterval(of: .day, for: day)?.end ?? last.timestamp
+                        return StayEvent(
+                            id: segments[0].id,
+                            visitID: first.persistentModelID,
+                            coordinate: coordinate,
+                            startedAt: max(day, first.timestamp),
+                            endedAt: min(dayEnd, last.timestamp)
+                        )
+                    }
+                    contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
+                        kind: kind,
+                        followsGap: followsGap,
+                        segments: segments,
+                        endpoints: endpoints,
+                        stay: stay
+                    ))
+                }
+
+                if slice.visitCoordinate == nil {
+                    let segments = completeSegments ?? RouteActivitySegment.group(
+                        sortedPoints: Array(slice.points), inferModes: true,
+                        leadingStayPoint: leading, trailingStayPoint: trailing
+                    )
+                    let arrival = trailing.flatMap { point in
+                        nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
+                    }
+                    if let journey = Self.journey(in: segments, departure: previousCoordinate, arrival: arrival) {
+                        contribution.journeys.append(journey)
+                    }
+                }
+            }
+        }
+        return contribution
     }
 
     private static func journey(

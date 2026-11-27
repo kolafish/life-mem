@@ -77,30 +77,48 @@ struct LifeMemApp: App {
 }
 
 private struct RootView: View {
+    private enum Tab {
+        case record, review, analytics
+    }
+
+    @Environment(\.calendar) private var calendar
+    @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
+    private var routes: [RecordedRoute]
     @State private var recorder: RouteRecorder
+    @State private var selection = Tab.record
+    @State private var review: RouteReview?
+    @State private var reviewCache = RouteReviewCache()
 
     init(context: ModelContext) {
         _recorder = State(initialValue: RouteRecorder(context: context))
     }
 
     var body: some View {
-        TabView {
+        let revision = selection == .record ? nil : RouteReviewRevision(calendar: calendar, routes: routes)
+        TabView(selection: $selection) {
             NavigationStack {
                 RecordView(recorder: recorder)
             }
             .tabItem { Label("记录", systemImage: "location.circle") }
+            .tag(Tab.record)
 
             NavigationStack {
-                RouteHistoryView()
+                RouteHistoryView(review: review, hasRoutes: !routes.isEmpty)
             }
             .tabItem { Label("回顾", systemImage: "calendar") }
+            .tag(Tab.review)
 
             NavigationStack {
-                AnalyticsView()
+                AnalyticsView(review: review)
             }
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
+            .tag(Tab.analytics)
         }
         .tint(.indigo)
+        .task(id: revision) {
+            guard revision != nil, !Task.isCancelled else { return }
+            review = reviewCache.review(routes: routes, calendar: calendar)
+        }
         .alert("Life Mem", isPresented: Binding(
             get: { recorder.notice != nil },
             set: { if !$0 { recorder.notice = nil } }
