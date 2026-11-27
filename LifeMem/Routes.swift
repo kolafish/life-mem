@@ -215,6 +215,21 @@ struct RoutePlace: Identifiable {
     }
 }
 
+struct RouteReviewRevision: Hashable {
+    private struct RouteVersion: Hashable {
+        let id: UUID
+        let pointCount: Int
+    }
+
+    let calendar: Calendar
+    private let routes: [RouteVersion]
+
+    init(calendar: Calendar, routes: [RecordedRoute]) {
+        self.calendar = calendar
+        self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount) }
+    }
+}
+
 struct RouteReview {
     private static let minimumVisitDuration: TimeInterval = 8 * 60
     private static let stayRadius: CLLocationDistance = 60

@@ -47,6 +47,21 @@ final class ReviewUITests: XCTestCase {
         app.alerts.buttons["取消"].tap()
     }
 
+    func testAnalyticsPeriodAndRanking() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["分析"].tap()
+        XCTAssertTrue(app.staticTexts["时间分配"].waitForExistence(timeout: 6))
+        app.buttons["自定义"].tap()
+        let startDate = app.descendants(matching: .any).matching(identifier: "analytics-start-date").firstMatch
+        let endDate = app.descendants(matching: .any).matching(identifier: "analytics-end-date").firstMatch
+        XCTAssertTrue(startDate.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(endDate.exists)
+        app.buttons["本月"].tap()
+        let ranking = app.staticTexts["常去地点"]
+        for _ in 0..<4 where !ranking.isHittable { app.swipeUp() }
+        XCTAssertTrue(ranking.isHittable)
+    }
+
     private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extraArguments

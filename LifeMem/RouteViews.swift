@@ -21,16 +21,6 @@ struct RouteHistoryView: View {
         case places = "地点"
     }
 
-    private struct Revision: Hashable {
-        let calendar: Calendar
-        let routes: [RouteVersion]
-
-        struct RouteVersion: Hashable {
-            let id: UUID
-            let pointCount: Int
-        }
-    }
-
     var body: some View {
         let routes = routes
         VStack(spacing: 0) {
@@ -93,7 +83,7 @@ struct RouteHistoryView: View {
         .sheet(isPresented: $showsArchive) {
             NavigationStack { RouteArchiveView() }
         }
-        .task(id: Revision(calendar: calendar, routes: routes.map { .init(id: $0.id, pointCount: $0.pointCount) })) {
+        .task(id: RouteReviewRevision(calendar: calendar, routes: routes)) {
             review = RouteReview(routes: routes, calendar: calendar)
         }
     }

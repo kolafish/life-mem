@@ -94,6 +94,11 @@ private struct RootView: View {
                 RouteHistoryView()
             }
             .tabItem { Label("回顾", systemImage: "calendar") }
+
+            NavigationStack {
+                AnalyticsView()
+            }
+            .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
         }
         .tint(.indigo)
         .alert("Life Mem", isPresented: Binding(
