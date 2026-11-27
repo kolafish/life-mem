@@ -37,6 +37,8 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 轨迹数据库保存在 App 的本机目录，禁用自动云同步和云备份。地图回看由 Apple MapKit 提供。可在「回顾」右上角打开「管理记录」，向左滑动删除一条原始记录及其各日轨迹。暂停后也可以在「记录」页丢弃当前路线。重开 App 时，最近一条未结束记录会以暂停状态恢复。
 
+地图会自动将中国大陆的轨迹、停留点和地图聚焦位置对齐高德底图。新旧路线都在显示时从 WGS-84 换算为 GCJ-02，原始轨迹、里程和地点名称沿用本机存储。换算在设备上完成。覆盖范围取自公共领域数据 [Natural Earth 1:10m Admin 0 Map Units v5.1.2](https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_10m_admin_0_map_units.geojson) 中 `GU_A3` 为 `CHN` 的区域，经纬度保留五位小数。
+
 ## 分析
 
 「分析」支持本周、本月和自定义日期。「时间分配与记录覆盖」区分观测到的移动、停留和未记录。过去日期按当地自然日结算，今天只统计到当前时刻，未来日期不入图。回顾与分析复用已解析的路线。分析可以从本机每日摘要直接打开，追加、删除或时区变化后会按当前数据刷新。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按首次观测到移动的日期和小时归类，展示整趟行程的耗时范围和中位数。「本期洞察」显示首次记录的地点数、居家占已记录时长比例，以及有足够同路线样本时的通勤对比。「常走路线」同时列出本期平均和历史最短、最长耗时。
@@ -49,12 +51,12 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ### 路线回归检查
 
-覆盖自适应采样、活动分段、按日切分、中断、停留分组、行程起终点、地名复用和保存，以及重开数据库后的持久性及删除行为。
+覆盖地图坐标换算、自适应采样、活动分段、按日切分、中断、停留分组、行程起终点、地名复用和保存，以及重开数据库后的持久性及删除行为。
 
 ```sh
 mkdir -p DerivedData
 xcrun swiftc -parse-as-library \
-  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior,RouteInsights}.swift \
+  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior,RouteInsights,RouteMapProjection}.swift \
   tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```

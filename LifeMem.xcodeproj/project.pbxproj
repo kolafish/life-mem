@@ -32,6 +32,8 @@
 		AA0000000000000000000430 /* PlaceSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000330 /* PlaceSuggestions.swift */; };
 		AA0000000000000000000440 /* RouteInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000340 /* RouteInsights.swift */; };
 		AA0000000000000000000441 /* RouteInsightCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000341 /* RouteInsightCards.swift */; };
+		AA0000000000000000000442 /* RouteMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000342 /* RouteMapProjection.swift */; };
+		AA0000000000000000000443 /* AMapMainlandCoverage.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000343 /* AMapMainlandCoverage.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +76,8 @@
 		AA0000000000000000000330 /* PlaceSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSuggestions.swift; sourceTree = "<group>"; };
 		AA0000000000000000000340 /* RouteInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteInsights.swift; sourceTree = "<group>"; };
 		AA0000000000000000000341 /* RouteInsightCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteInsightCards.swift; sourceTree = "<group>"; };
+		AA0000000000000000000342 /* RouteMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteMapProjection.swift; sourceTree = "<group>"; };
+		AA0000000000000000000343 /* AMapMainlandCoverage.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AMapMainlandCoverage.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -108,6 +112,8 @@
 				AA0000000000000000000303 /* DayPickerHeader.swift */,
 				AA0000000000000000000302 /* TimelineSegmentRow.swift */,
 				AA0000000000000000000301 /* RouteMapContainer.swift */,
+				AA0000000000000000000342 /* RouteMapProjection.swift */,
+				AA0000000000000000000343 /* AMapMainlandCoverage.json */,
 				AA0000000000000000000300 /* DailySummaryCard.swift */,
 				AA0000000000000000000008 /* PlaceNamingView.swift */,
 				AA0000000000000000000009 /* PlaceResolver.swift */,
@@ -131,7 +137,7 @@
 		AA0000000000000000000031 /* LifeMem */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = AA0000000000000000000052 /* Target configurations */;
-			buildPhases = (AA0000000000000000000041 /* Sources */);
+			buildPhases = (AA0000000000000000000041 /* Sources */, AA0000000000000000000042 /* Resources */);
 			buildRules = ();
 			dependencies = ();
 			name = LifeMem;
@@ -175,6 +181,15 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		AA0000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AA0000000000000000000443 /* AMapMainlandCoverage.json in Resources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		AA0000000000000000000041 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -199,6 +214,7 @@
 				AA0000000000000000000403 /* DayPickerHeader.swift in Sources */,
 				AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */,
 				AA0000000000000000000401 /* RouteMapContainer.swift in Sources */,
+				AA0000000000000000000442 /* RouteMapProjection.swift in Sources */,
 				AA0000000000000000000400 /* DailySummaryCard.swift in Sources */,
 				AA0000000000000000000018 /* PlaceNamingView.swift in Sources */,
 				AA0000000000000000000019 /* PlaceResolver.swift in Sources */,

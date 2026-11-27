@@ -151,11 +151,12 @@ struct PlaceNamingView: View {
     }
 
     private var lookupMap: some View {
-        Map(
-            initialPosition: .region(MKCoordinateRegion(center: target.coordinate, latitudinalMeters: 350, longitudinalMeters: 350)),
+        let mapCoordinate = RouteMapProjection.standard.coordinate(for: target.coordinate)
+        return Map(
+            initialPosition: .region(MKCoordinateRegion(center: mapCoordinate, latitudinalMeters: 350, longitudinalMeters: 350)),
             interactionModes: []
         ) {
-            Marker("所选位置", coordinate: target.coordinate).tint(.indigo)
+            Marker("所选位置", coordinate: mapCoordinate).tint(.indigo)
         }
         .mapStyle(.standard(emphasis: .muted))
         .frame(height: 150)

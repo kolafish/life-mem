@@ -6,6 +6,7 @@ import SwiftData
 struct RouteChecks {
     @MainActor
     static func main() async throws {
+        checkMapProjection()
         let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3_600)
         let first = location(longitude: 0, at: start)
         let nearby = location(longitude: 0.00012, at: start.addingTimeInterval(10))
@@ -100,7 +101,42 @@ struct RouteChecks {
         try await checkPlaceResolver(in: root)
         await checkSharedPlaceCancellation(in: root)
         try await checkPlacePrefetch(in: root)
-        print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+        print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+    }
+
+    private static func checkMapProjection() {
+        let coverageURL = URL(fileURLWithPath: "LifeMem/AMapMainlandCoverage.json")
+        let projection = RouteMapProjection(coverageURL: coverageURL)
+        let mainlandExamples = [
+            // Beijing and Shanghai public example coordinates with reference conversion results.
+            (39.9, 116.3, 39.90126009494757, 116.30607290385822),
+            (31.2304, 121.4737, 31.22845773757727, 121.47822305927693)
+        ]
+        for (latitude, longitude, expectedLatitude, expectedLongitude) in mainlandExamples {
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            let projected = projection.coordinate(for: coordinate)
+            precondition(abs(projected.latitude - expectedLatitude) < 1e-9)
+            precondition(abs(projected.longitude - expectedLongitude) < 1e-9)
+        }
+
+        let haikou = CLLocationCoordinate2D(latitude: 20.02, longitude: 110.33)
+        precondition(projection.coordinate(for: haikou).longitude != haikou.longitude)
+        let outsideCoverage = [
+            (22.2819, 114.1581), (22.1943, 113.5438), (25.034, 121.5654), // Hong Kong, Macao, Taipei
+            (21.0278, 105.8342), (37.5665, 126.978), (47.9186, 106.9176), // Hanoi, Seoul, Ulaanbaatar
+            (35.6762, 139.6503), (37.78, -122.42), (91.0, 116.3)
+        ]
+        for (latitude, longitude) in outsideCoverage {
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            let projected = projection.coordinate(for: coordinate)
+            precondition(projected.latitude == latitude && projected.longitude == longitude)
+        }
+        let invalid = projection.coordinate(for: .init(latitude: .nan, longitude: 116.3))
+        precondition(invalid.latitude.isNaN && invalid.longitude == 116.3)
+
+        let missingCoverage = RouteMapProjection(coverageURL: nil)
+        let unchanged = missingCoverage.coordinate(for: haikou)
+        precondition(unchanged.latitude == haikou.latitude && unchanged.longitude == haikou.longitude)
     }
 
     private static func checkPureSegmentBuilder(at start: Date) {

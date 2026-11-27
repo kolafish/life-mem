@@ -26,7 +26,7 @@ struct RouteMapContainer: View {
     var body: some View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
             ForEach(stayMarkers) { group in
-                Annotation("停留", coordinate: group.coordinate) {
+                Annotation("停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
                     stayMarker(group)
                 }
                 .annotationTitles(.hidden)
@@ -36,13 +36,13 @@ struct RouteMapContainer: View {
                     let coordinates = segment.coordinates
                     if segment.mode != .stationary, coordinates.count > 1 {
                         let focused = selected == nil || selected?.id == entry.id
-                        MapPolyline(coordinates: coordinates)
+                        MapPolyline(coordinates: coordinates.map(RouteMapProjection.standard.coordinate(for:)))
                             .stroke(segment.mode.mapColor.opacity(focused ? 1 : 0.4), style: StrokeStyle(
                                 lineWidth: focused ? 4 : 3, lineCap: .round, lineJoin: .round,
                                 dash: segment.mode == .walking ? [5, 6] : []
                             ))
                     } else if segment.mode != .stationary || entry.kind == .fragment {
-                        Annotation("定位点", coordinate: segment.startCoordinate) {
+                        Annotation("定位点", coordinate: RouteMapProjection.standard.coordinate(for: segment.startCoordinate)) {
                             Circle().fill(segment.mode.mapColor).frame(width: 8, height: 8)
                         }
                         .annotationTitles(.hidden)
@@ -111,15 +111,18 @@ struct RouteMapContainer: View {
 
     private func camera(for entry: RouteReviewEntry) -> MapCameraPosition {
         if let coordinate = entry.visitCoordinate {
-            return .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 420, longitudinalMeters: 420))
+            let center = RouteMapProjection.standard.coordinate(for: coordinate)
+            return .region(MKCoordinateRegion(center: center, latitudinalMeters: 420, longitudinalMeters: 420))
         }
         let coordinates = entry.segments.flatMap(\.coordinates)
-        guard let first = coordinates.first else { return .automatic }
+        guard let firstCoordinate = coordinates.first else { return .automatic }
+        let first = RouteMapProjection.standard.coordinate(for: firstCoordinate)
         var south = first.latitude
         var north = first.latitude
         var west = 0.0
         var east = 0.0
-        for point in coordinates.dropFirst() {
+        for coordinate in coordinates.dropFirst() {
+            let point = RouteMapProjection.standard.coordinate(for: coordinate)
             south = min(south, point.latitude)
             north = max(north, point.latitude)
             let offset = (point.longitude - first.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
@@ -140,17 +143,19 @@ struct RouteMapContainer: View {
         if let start = segments.first?.firstCoordinate, let end = segments.last?.lastCoordinate {
             let startName = entry.endpoints.flatMap { placeResolver.label(near: $0.start, names: placeNames) }
             let endName = entry.endpoints.flatMap { placeResolver.label(near: $0.end, names: placeNames) }
+            let mapStart = RouteMapProjection.standard.coordinate(for: start)
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
-                Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: start).tint(.indigo)
+                Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: mapStart).tint(.indigo)
             } else {
-                Marker(startName ?? "起点", systemImage: "flag", coordinate: start).tint(.indigo)
-                Marker(endName ?? "终点", systemImage: "flag.checkered", coordinate: end).tint(.indigo)
+                let mapEnd = RouteMapProjection.standard.coordinate(for: end)
+                Marker(startName ?? "起点", systemImage: "flag", coordinate: mapStart).tint(.indigo)
+                Marker(endName ?? "终点", systemImage: "flag.checkered", coordinate: mapEnd).tint(.indigo)
             }
         }
         if let line = segments.max(by: { $0.coordinates.count < $1.coordinates.count })?.coordinates, line.count > 1 {
             let index = (line.count - 1) / 2
-            let start = line[index]
-            let end = line[index + 1]
+            let start = RouteMapProjection.standard.coordinate(for: line[index])
+            let end = RouteMapProjection.standard.coordinate(for: line[index + 1])
             let latitude = (start.latitude + end.latitude) / 2
             let longitudeDelta = (end.longitude - start.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
             let longitude = (start.longitude + longitudeDelta / 2 + 540).truncatingRemainder(dividingBy: 360) - 180

@@ -239,14 +239,15 @@ private struct RoutePlaceReviewView: View {
     var body: some View {
         let canLookUp = scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
         let name = placeResolver.label(near: place.coordinate, names: placeNames)
+        let mapCoordinate = RouteMapProjection.standard.coordinate(for: place.coordinate)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
             Section {
                 Map(
-                    initialPosition: .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 500, longitudinalMeters: 500)),
+                    initialPosition: .region(MKCoordinateRegion(center: mapCoordinate, latitudinalMeters: 500, longitudinalMeters: 500)),
                     interactionModes: [.pan, .zoom]
                 ) {
-                    Marker(name ?? "停留地点", coordinate: place.coordinate).tint(.indigo)
+                    Marker(name ?? "停留地点", coordinate: mapCoordinate).tint(.indigo)
                 }
                 .mapStyle(.standard(emphasis: .muted))
                 .frame(height: 220)
