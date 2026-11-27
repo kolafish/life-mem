@@ -19,6 +19,8 @@ struct PlaceNamingView: View {
     @State private var lookupID: UUID?
     @State private var suggestions: [String]?
     @State private var saveFailed = false
+    @State private var confirmsRebuild = false
+    @State private var rebuildFailed = false
 
     init(target: PlaceNamingTarget, initialName: String?, category: PlaceCategory?) {
         self.target = target
@@ -29,6 +31,22 @@ struct PlaceNamingView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let issue = placeNames.loadIssue {
+                    Section("地名文件") {
+                        Text(issue == .damaged ? "保存的地名文件无法解析。" : "暂时无法读取保存的地名。")
+                            .foregroundStyle(.secondary)
+                        Button("重试读取") {
+                            placeNames.reload()
+                            if name.isEmpty, let restored = placeNames.name(for: target.coordinate) {
+                                category = placeNames.category(for: target.coordinate)
+                                name = restored
+                            }
+                        }
+                        if issue == .damaged {
+                            Button("重建地名文件", role: .destructive) { confirmsRebuild = true }
+                        }
+                    }
+                }
                 Section("地名") {
                     TextField("例如市图书馆", text: $name)
                         .accessibilityLabel("地点名称")
@@ -101,10 +119,24 @@ struct PlaceNamingView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save(name) }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(placeNames.loadIssue != nil || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .alert("暂时无法保存地名", isPresented: $saveFailed) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text("请检查设备的可用存储空间后重试。")
+            }
+            .alert("重建地名文件？", isPresented: $confirmsRebuild) {
+                Button("重建", role: .destructive) {
+                    do { try placeNames.rebuildDamagedFile() }
+                    catch { rebuildFailed = true }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("原文件会保留在这台手机上。重建后可以重新添加地名和分类。")
+            }
+            .alert("暂时无法重建地名文件", isPresented: $rebuildFailed) {
                 Button("好", role: .cancel) {}
             } message: {
                 Text("请检查设备的可用存储空间后重试。")

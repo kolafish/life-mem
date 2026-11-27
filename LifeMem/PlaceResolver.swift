@@ -118,7 +118,7 @@ final class PlaceResolver {
         automaticRevision = UUID()
         if !enabled, let demands = active?.demands {
             active?.demands = demands.filter { $0.value.automaticRevision == nil }
-            cancelWithoutOriginDemand()
+            cancelWithoutDemand()
         }
     }
 
@@ -127,7 +127,7 @@ final class PlaceResolver {
         entries = []
         cacheRevision = UUID()
         active?.demands.removeAll()
-        cancelWithoutOriginDemand()
+        cancelWithoutDemand()
     }
 
     func cached(near coordinate: CLLocationCoordinate2D) -> MapPlaceSuggestion? {
@@ -182,7 +182,7 @@ final class PlaceResolver {
             cancellation.cancel()
             Task { @MainActor [weak self] in
                 self?.active?.demands.removeValue(forKey: id)
-                self?.cancelWithoutOriginDemand()
+                self?.cancelWithoutDemand()
             }
         }
     }
@@ -191,6 +191,7 @@ final class PlaceResolver {
         guard !demand.cancellation.isCancelled else { return false }
         guard let revision = demand.automaticRevision else { return true }
         return isAutomaticEnabled && revision == automaticRevision &&
+            demand.names?.loadIssue == nil &&
             demand.names?.name(for: demand.location.coordinate) == nil
     }
 
@@ -201,8 +202,12 @@ final class PlaceResolver {
         }
     }
 
-    private func cancelWithoutOriginDemand() {
-        if let active, !hasOriginDemand(active) { active.task.cancel() }
+    private func hasEligibleDemand(_ request: ActiveLookup) -> Bool {
+        request.demands.values.contains(where: isEligible)
+    }
+
+    private func cancelWithoutDemand() {
+        if let active, !hasEligibleDemand(active) { active.task.cancel() }
     }
 
     private func performLookup(id: UUID, coordinate: CLLocationCoordinate2D) async -> LookupOutcome {
@@ -219,18 +224,19 @@ final class PlaceResolver {
         let result: LookupResponse
         do {
             result = try await lookup(coordinate) {
-                guard !Task.isCancelled, let current = self.active, self.hasOriginDemand(current) else {
+                // A new network request at the original coordinate still needs an eligible caller there.
+                guard !Task.isCancelled, let current = self.active, current.id == id, self.hasOriginDemand(current) else {
                     throw CancellationError()
                 }
             }
         } catch is CancellationError {
             return .abandoned
         } catch {
-            guard !Task.isCancelled else { return .abandoned }
+            guard !Task.isCancelled, let current = self.active, current.id == id, hasEligibleDemand(current) else { return .abandoned }
             backOff()
             return .completed(nil)
         }
-        guard !Task.isCancelled, let current = self.active, hasOriginDemand(current) else { return .abandoned }
+        guard !Task.isCancelled, let current = self.active, current.id == id, hasEligibleDemand(current) else { return .abandoned }
         if result.shouldBackOff {
             backOff()
         } else {
@@ -283,9 +289,12 @@ final class PlaceResolver {
         }.sorted { $0.distance < $1.distance }
 
         let result: MapPlaceSuggestion?
-        try checkDemand()
         do {
+            try checkDemand()
             result = try await reverseGeocode(location)
+        } catch is CancellationError {
+            guard !Task.isCancelled, !nearby.isEmpty else { throw CancellationError() }
+            result = nil
         } catch let error as CLError where error.code == .geocodeFoundNoResult {
             result = nil
         } catch let error as MKError where error.code == .placemarkNotFound {

@@ -97,6 +97,7 @@ struct RouteChecks {
         try checkPlaceNames(in: root)
         try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
+        await checkSharedPlaceCancellation(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
@@ -709,6 +710,7 @@ struct RouteChecks {
         let invalid = Data("incomplete".utf8)
         try invalid.write(to: invalidFile)
         let invalidStore = RoutePlaceNames(file: invalidFile)
+        precondition(invalidStore.loadIssue == .damaged)
         do {
             try invalidStore.save("测试名称", for: start)
             preconditionFailure("Saving must not replace a place-name file that could not be loaded.")
@@ -716,6 +718,27 @@ struct RouteChecks {
             let persisted = try Data(contentsOf: invalidFile)
             precondition(persisted == invalid)
         }
+        try invalidStore.rebuildDamagedFile()
+        precondition(invalidStore.loadIssue == nil)
+        try invalidStore.save("重新保存的地名", category: .work, for: start)
+        let rebuilt = RoutePlaceNames(file: invalidFile)
+        precondition(rebuilt.name(for: start) == "重新保存的地名" && rebuilt.category(for: start) == .work)
+        let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("invalid-place-names-damaged-") }
+        precondition(backups.count == 1)
+        let preserved = try Data(contentsOf: backups[0])
+        precondition(preserved == invalid)
+
+        let unreadableFile = directory.appending(path: "unreadable.json")
+        try FileManager.default.createDirectory(at: unreadableFile, withIntermediateDirectories: false)
+        let unreadable = RoutePlaceNames(file: unreadableFile)
+        precondition(unreadable.loadIssue == .unreadable)
+        try unreadable.rebuildDamagedFile()
+        precondition(unreadable.loadIssue == .unreadable)
+        try FileManager.default.removeItem(at: unreadableFile)
+        try legacy.write(to: unreadableFile)
+        unreadable.reload()
+        precondition(unreadable.loadIssue == nil && unreadable.name(for: start) == "旧版地点")
     }
 
     @MainActor
@@ -832,6 +855,48 @@ struct RouteChecks {
         let cancelledResult = await cancelled.value
         precondition(cancelledResult == nil && clearing.cached(near: uncached) == nil)
         precondition(furtherRequests == 0, "Revoked demand must not start a fallback network request.")
+    }
+
+    @MainActor
+    private static func checkSharedPlaceCancellation(in directory: URL) async {
+        let suite = "LifeMemTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let origin = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let nearby = CLLocationCoordinate2D(latitude: 0, longitude: 0.00012)
+        let suggestion = MapPlaceSuggestion(pointOfInterestNames: ["合成地名"], streetOrArea: nil, district: nil, city: nil)
+
+        for needsFallback in [false, true] {
+            let file = directory.appending(path: "shared-\(needsFallback).json")
+            var starts: [Double] = []
+            var fallbackStarts: [Double] = []
+            var finishFirst: CheckedContinuation<Void, Never>?
+            let resolver = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero) { coordinate, checkDemand in
+                starts.append(coordinate.longitude)
+                if starts.count == 1 { await withCheckedContinuation { finishFirst = $0 } }
+                if needsFallback {
+                    try checkDemand()
+                    fallbackStarts.append(coordinate.longitude)
+                }
+                return .init(suggestion)
+            }
+            resolver.setAutomaticEnabled(true)
+            let automatic = Task { await resolver.resolve(near: origin, automatic: true) }
+            while finishFirst == nil { await Task.yield() }
+            var joined = false
+            let manual = Task {
+                joined = true
+                return await resolver.resolve(near: nearby, automatic: false)
+            }
+            while !joined { await Task.yield() }
+            if needsFallback { resolver.setAutomaticEnabled(false) } else { automatic.cancel() }
+            finishFirst?.resume()
+            let originalResult = await automatic.value
+            let manualResult = await manual.value
+            precondition(originalResult == nil && manualResult?.displayName == suggestion.displayName)
+            precondition(starts == (needsFallback ? [origin.longitude, nearby.longitude] : [origin.longitude]))
+            precondition(fallbackStarts == (needsFallback ? [nearby.longitude] : []))
+        }
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)

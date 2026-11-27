@@ -162,6 +162,43 @@ final class ReviewUITests: XCTestCase {
         XCTAssertFalse(confirm.exists)
     }
 
+    func testDamagedPlaceNamesCanBeRebuiltAndSaved() {
+        let app = launch(fixture: "damaged-names")
+        app.tabBars.buttons["回顾"].tap()
+        let day = app.descendants(matching: .any).matching(identifier: "review-day").firstMatch
+        XCTAssertTrue(day.waitForExistence(timeout: 8))
+        day.tap()
+        let stay = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@", "停留地点")).firstMatch
+        scrollTo(stay, in: app, horizontalOffset: 0.98)
+        XCTAssertTrue(stay.isHittable)
+        stay.tap()
+        let edit = app.buttons["编辑地名"]
+        scrollTo(edit, in: app, horizontalOffset: 0.98)
+        edit.tap()
+
+        let rebuild = app.buttons["重建地名文件"]
+        XCTAssertTrue(rebuild.waitForExistence(timeout: 5))
+        app.buttons["重试读取"].tap()
+        XCTAssertTrue(rebuild.exists)
+        rebuild.tap()
+        let confirm = app.alerts["重建地名文件？"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.buttons["取消"].tap()
+        XCTAssertTrue(rebuild.exists)
+        rebuild.tap()
+        confirm.buttons["重建"].tap()
+
+        let name = app.textFields["地点名称"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("Restored")
+        app.buttons["保存"].tap()
+        let restored = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@", "Restored")).firstMatch
+        XCTAssertTrue(restored.waitForExistence(timeout: 5))
+    }
+
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication, horizontalOffset: Double = 0.5) {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: 0.73))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: 0.49))
