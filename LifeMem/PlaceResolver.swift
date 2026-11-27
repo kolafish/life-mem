@@ -28,6 +28,9 @@ final class PlaceResolver {
     private static let searchRadius: CLLocationDistance = 50
     private static let cacheRadius: CLLocationDistance = 25
 
+    typealias DemandCheck = @MainActor () throws -> Void
+    typealias Lookup = @MainActor (CLLocationCoordinate2D, DemandCheck) async throws -> LookupResponse
+
     struct LookupResponse {
         let suggestion: MapPlaceSuggestion?
         let shouldBackOff: Bool
@@ -78,7 +81,7 @@ final class PlaceResolver {
 
     private let file: URL
     private let defaults: UserDefaults
-    private let lookup: (CLLocationCoordinate2D) async throws -> LookupResponse
+    private let lookup: Lookup
     private let clock = ContinuousClock()
     private let minimumInterval: Duration
     private let initialBackoff: Duration
@@ -96,7 +99,7 @@ final class PlaceResolver {
         defaults: UserDefaults = .standard,
         minimumInterval: Duration = .seconds(2),
         initialBackoff: Duration = .seconds(15),
-        lookup: ((CLLocationCoordinate2D) async throws -> LookupResponse)? = nil
+        lookup: Lookup? = nil
     ) {
         self.file = file
         self.defaults = defaults
@@ -215,7 +218,13 @@ final class PlaceResolver {
         nextStart = clock.now.advanced(by: minimumInterval)
         let result: LookupResponse
         do {
-            result = try await lookup(coordinate)
+            result = try await lookup(coordinate) {
+                guard !Task.isCancelled, let current = self.active, self.hasOriginDemand(current) else {
+                    throw CancellationError()
+                }
+            }
+        } catch is CancellationError {
+            return .abandoned
         } catch {
             guard !Task.isCancelled else { return .abandoned }
             backOff()
@@ -241,7 +250,10 @@ final class PlaceResolver {
         retryAfter = clock.now.advanced(by: backoff)
     }
 
-    private static func systemLookup(near coordinate: CLLocationCoordinate2D) async throws -> LookupResponse {
+    private static func systemLookup(
+        near coordinate: CLLocationCoordinate2D,
+        checkDemand: DemandCheck
+    ) async throws -> LookupResponse {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: searchRadius)
         let items: [MKMapItem]
@@ -256,7 +268,6 @@ final class PlaceResolver {
             items = []
             lookupError = error
         }
-        try Task.checkCancellation()
         let nearby = items.compactMap { item -> (name: String, distance: CLLocationDistance)? in
             guard let name = item.name, !name.isEmpty else { return nil }
             let position: CLLocation?
@@ -272,6 +283,7 @@ final class PlaceResolver {
         }.sorted { $0.distance < $1.distance }
 
         let result: MapPlaceSuggestion?
+        try checkDemand()
         do {
             result = try await reverseGeocode(location)
         } catch let error as CLError where error.code == .geocodeFoundNoResult {
