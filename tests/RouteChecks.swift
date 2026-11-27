@@ -453,6 +453,62 @@ struct RouteChecks {
         let cleared = PlaceResolver(file: file, defaults: defaults) { _ in nil }
         precondition(cleared.cached(near: neighbor) == nil)
         precondition(cleared.label(near: neighbor, names: names) == "最喜欢的图书馆")
+
+        let clock = ContinuousClock()
+        var starts: [ContinuousClock.Instant] = []
+        let coordinated = PlaceResolver(file: file, defaults: defaults, minimumInterval: .milliseconds(40)) { _ in
+            starts.append(clock.now)
+            try await Task.sleep(for: .milliseconds(20))
+            return MapPlaceSuggestion(pointOfInterestNames: ["合成地名"], streetOrArea: nil, district: nil, city: nil)
+        }
+        coordinated.setAutomaticEnabled(true)
+        async let automatic = coordinated.resolve(near: place, automatic: true)
+        async let manual = coordinated.resolve(near: neighbor, automatic: false)
+        async let distinct = coordinated.resolve(near: anotherPlace, automatic: false)
+        for result in await [automatic, manual, distinct] {
+            precondition(result?.displayName == "合成地名附近")
+        }
+        precondition(starts.count == 2 && starts[0].duration(to: starts[1]) >= .milliseconds(40))
+
+        enum LookupFailure: Error { case unavailable }
+        var attempts = 0
+        let failed = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero, initialBackoff: .milliseconds(200)) { _ in
+            attempts += 1
+            if attempts == 1 { throw LookupFailure.unavailable }
+            return nil
+        }
+        let uncached = CLLocationCoordinate2D(latitude: 0, longitude: 1)
+        let anotherUncached = CLLocationCoordinate2D(latitude: 0, longitude: 2)
+        _ = await failed.resolve(near: uncached, automatic: false)
+        _ = await failed.resolve(near: anotherUncached, automatic: false)
+        precondition(attempts == 1)
+        let cachedOffline = await failed.resolve(near: place, automatic: false)
+        precondition(cachedOffline?.displayName == "合成地名附近")
+        try await Task.sleep(for: .milliseconds(220))
+        _ = await failed.resolve(near: uncached, automatic: false)
+        _ = await failed.resolve(near: anotherUncached, automatic: false)
+        precondition(attempts == 3, "A completed lookup with no match must not trigger network backoff.")
+
+        var finish: CheckedContinuation<Void, Never>?
+        let clearing = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero) { _ in
+            await withCheckedContinuation { finish = $0 }
+            return MapPlaceSuggestion(pointOfInterestNames: ["过期结果"], streetOrArea: nil, district: nil, city: nil)
+        }
+        let pending = Task { await clearing.resolve(near: uncached, automatic: false) }
+        while finish == nil { await Task.yield() }
+        try clearing.clearCache()
+        finish?.resume()
+        let clearedPending = await pending.value
+        precondition(clearedPending == nil && clearing.cached(near: uncached) == nil)
+
+        finish = nil
+        let automaticPending = Task { await clearing.resolve(near: anotherUncached, automatic: true) }
+        while finish == nil { await Task.yield() }
+        clearing.setAutomaticEnabled(false)
+        clearing.setAutomaticEnabled(true)
+        finish?.resume()
+        let revokedPending = await automaticPending.value
+        precondition(revokedPending == nil && clearing.cached(near: anotherUncached) == nil)
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)
