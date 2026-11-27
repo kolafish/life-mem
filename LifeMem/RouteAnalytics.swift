@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 enum RouteTimeUse: String, CaseIterable, Identifiable {
-    case home, work, moving, leisure, exercise, other
+    case home, work, moving, leisure, exercise, other, untracked
 
     var id: Self { self }
 
@@ -14,6 +14,7 @@ enum RouteTimeUse: String, CaseIterable, Identifiable {
         case .leisure: "餐饮休闲"
         case .exercise: "运动"
         case .other: "其他停留"
+        case .untracked: "未记录"
         }
     }
 
@@ -62,22 +63,48 @@ struct RouteAnalytics {
     let time: [TimeBucket]
     let places: [PlaceRank]
 
-    init(review: RouteReview, range: ClosedRange<Date>, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
-        self.init(summary: RouteSummary(review: review), range: range, category: category)
+    var trackedDuration: TimeInterval {
+        time.filter { $0.use != .untracked }.reduce(0) { $0 + $1.seconds }
     }
 
-    init(summary: RouteSummary, range: ClosedRange<Date>, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
+    var elapsedDuration: TimeInterval { time.reduce(0) { $0 + $1.seconds } }
+
+    init(
+        review: RouteReview, range: ClosedRange<Date>, calendar: Calendar,
+        now: Date = .now, category: (CLLocationCoordinate2D) -> PlaceCategory?
+    ) {
+        self.init(summary: RouteSummary(review: review), range: range, calendar: calendar, now: now, category: category)
+    }
+
+    init(
+        summary: RouteSummary, range: ClosedRange<Date>, calendar: Calendar,
+        now: Date = .now, category: (CLLocationCoordinate2D) -> PlaceCategory?
+    ) {
+        let summariesByDate = Dictionary(uniqueKeysWithValues: summary.days.map { ($0.date, $0) })
         var totals: [RouteTimeUse: TimeInterval] = [:]
         var durationByVisit: [RouteVisit.ID: TimeInterval] = [:]
-        days = summary.days.reversed().filter { range.contains($0.date) }.map { day in
-            var recorded: [RouteTimeUse: TimeInterval] = [.moving: day.movingDuration]
-            for stay in day.stays where stay.duration > 0 {
-                recorded[RouteTimeUse(category: category(stay.coordinate)), default: 0] += stay.duration
-                durationByVisit[stay.visitID, default: 0] += stay.duration
+        var days: [Day] = []
+        var day = calendar.startOfDay(for: range.lowerBound)
+        let lastDay = min(calendar.startOfDay(for: range.upperBound), calendar.startOfDay(for: now))
+        while day <= lastDay, day < now, let interval = calendar.dateInterval(of: .day, for: day) {
+            let elapsed = DateInterval(start: day, end: min(interval.end, now))
+            let summary = summariesByDate[day]
+            var observations = (summary?.movement ?? []).compactMap { item in
+                Self.clip(item, to: elapsed).map { Observation(use: .moving, interval: $0) }
             }
-            for (use, seconds) in recorded { totals[use, default: 0] += seconds }
-            return Day(date: day.date, time: Self.buckets(recorded))
+            for stay in (summary?.stays ?? []).sorted(by: { $0.startedAt < $1.startedAt }) where stay.duration > 0 {
+                let span = DateInterval(start: stay.startedAt, end: stay.endedAt)
+                guard let observed = Self.clip(span, to: elapsed) else { continue }
+                observations.append(Observation(use: RouteTimeUse(category: category(stay.coordinate)), interval: observed))
+                durationByVisit[stay.visitID, default: 0] += observed.duration
+            }
+            var seconds = Self.observedTime(observations)
+            seconds[.untracked] = max(0, elapsed.duration - seconds.values.reduce(0, +))
+            for (use, duration) in seconds { totals[use, default: 0] += duration }
+            days.append(Day(date: day, time: Self.buckets(seconds)))
+            day = interval.end
         }
+        self.days = days
         time = Self.buckets(totals)
         places = summary.places.compactMap { place in
             let visitDurations = place.visits.compactMap { durationByVisit[$0.id] }
@@ -96,6 +123,47 @@ struct RouteAnalytics {
             }
         }
         return Array(sorted.prefix(10))
+    }
+
+    private struct Observation {
+        let use: RouteTimeUse
+        let interval: DateInterval
+    }
+
+    private struct Boundary {
+        let time: Date
+        let observation: Int
+        let starts: Bool
+    }
+
+    private static func clip(_ interval: DateInterval, to window: DateInterval) -> DateInterval? {
+        let start = max(interval.start, window.start)
+        let end = min(interval.end, window.end)
+        guard start < end else { return nil }
+        return DateInterval(start: start, end: end)
+    }
+
+    private static func observedTime(_ observations: [Observation]) -> [RouteTimeUse: TimeInterval] {
+        let boundaries = observations.enumerated().flatMap { index, item in
+            [Boundary(time: item.interval.start, observation: index, starts: true),
+             Boundary(time: item.interval.end, observation: index, starts: false)]
+        }.sorted { $0.time < $1.time }
+        var active: Set<Int> = []
+        var totals: [RouteTimeUse: TimeInterval] = [:]
+        var previous = boundaries.first?.time
+        for boundary in boundaries {
+            // Movement precedes stays. Overlapping stays prefer the first observation.
+            if let previous, let assigned = active.min() {
+                totals[observations[assigned].use, default: 0] += boundary.time.timeIntervalSince(previous)
+            }
+            if boundary.starts {
+                active.insert(boundary.observation)
+            } else {
+                active.remove(boundary.observation)
+            }
+            previous = boundary.time
+        }
+        return totals
     }
 
     private static func buckets(_ seconds: [RouteTimeUse: TimeInterval]) -> [TimeBucket] {

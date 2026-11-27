@@ -87,6 +87,7 @@ struct RouteChecks {
         precondition(segments[2].coordinates.count == 1)
         checkPureSegmentBuilder(at: start)
         try checkReview(context: context)
+        checkCoverageDates()
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
@@ -289,14 +290,16 @@ struct RouteChecks {
         precondition((afterMidnight[0].stay?.duration ?? 0) + (beforeMidnight[0].stay?.duration ?? 0) == 480)
         precondition(midnightReview.places[0].mostRecentVisit.id == beforeMidnight[0].id)
 
-        let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay) { _ in .home }
+        let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay, calendar: calendar) { _ in .home }
         precondition(bothDays.days.map(\.date) == [day, nextDay])
-        precondition(bothDays.time.first { $0.use == .home }?.seconds == 480)
+        precondition(bothDays.time.first { $0.use == .home }?.seconds == 420)
         precondition(bothDays.time.first { $0.use == .moving }?.seconds == 60)
+        precondition(bothDays.elapsedDuration == 2 * 86_400 && bothDays.trackedDuration == 480)
+        precondition(bothDays.time.first { $0.use == .untracked }?.seconds == 2 * 86_400 - 480)
         precondition(midnightReview.days.allSatisfy { $0.movingDuration == 30 })
         precondition(bothDays.places.count == 1 && bothDays.places[0].visits == 1 && bothDays.places[0].seconds == 480)
-        let onlyNextDay = RouteAnalytics(review: midnightReview, range: nextDay...nextDay) { _ in nil }
-        precondition(onlyNextDay.time.first { $0.use == .other }?.seconds == 360)
+        let onlyNextDay = RouteAnalytics(review: midnightReview, range: nextDay...nextDay, calendar: calendar) { _ in nil }
+        precondition(onlyNextDay.time.first { $0.use == .other }?.seconds == 330)
         precondition(onlyNextDay.places[0].visits == 1 && onlyNextDay.places[0].seconds == 360)
 
         let midnightEdge = insertRoute(context: context, start: nextDay.addingTimeInterval(-10), samples: [
@@ -309,9 +312,29 @@ struct RouteChecks {
             (Double($0), 0.05, .stationary, $0 == 0)
         })
         let rankedReview = RouteReview(routes: [outing, repeatedVisit, longVisit], calendar: calendar)
-        let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day) { _ in nil }
+        let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day, calendar: calendar) { _ in nil }
         precondition(ranked.topPlaces(by: .visits).first?.visits == 2)
         precondition(ranked.topPlaces(by: .duration).first?.seconds == 1_200)
+    }
+
+    private static func checkCoverageDates() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let empty = RouteSummary(records: [])
+        for (month, day, length) in [(3, 8, 23), (11, 1, 25)] {
+            let date = calendar.date(from: DateComponents(year: 2026, month: month, day: day))!
+            let next = calendar.date(byAdding: .day, value: 1, to: date)!
+            let analytics = RouteAnalytics(summary: empty, range: date...date, calendar: calendar, now: next) { _ in nil }
+            precondition(analytics.days.count == 1 && analytics.elapsedDuration == Double(length * 3_600))
+            precondition(analytics.time.count == 1 && analytics.time[0].use == .untracked)
+        }
+        let today = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10))!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let now = today.addingTimeInterval(4_321)
+        let analytics = RouteAnalytics(summary: empty, range: today...tomorrow, calendar: calendar, now: now) { _ in nil }
+        precondition(analytics.days.map(\.date) == [today] && analytics.elapsedDuration == 4_321)
+        let future = RouteAnalytics(summary: empty, range: tomorrow...tomorrow, calendar: calendar, now: now) { _ in nil }
+        precondition(future.days.isEmpty && future.elapsedDuration == 0)
     }
 
     @MainActor
