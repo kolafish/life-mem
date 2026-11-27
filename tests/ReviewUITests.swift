@@ -6,7 +6,7 @@ final class ReviewUITests: XCTestCase {
     }
 
     func testDailyMapAndTimelineSelection() {
-        let app = launch(fixture: "day")
+        let app = launch(fixture: "mainland-day")
         app.tabBars.buttons["回顾"].tap()
         let day = app.descendants(matching: .any).matching(identifier: "review-day").firstMatch
         XCTAssertTrue(day.waitForExistence(timeout: 10))

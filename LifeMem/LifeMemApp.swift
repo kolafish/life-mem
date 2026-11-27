@@ -214,7 +214,11 @@ private enum ReviewTestFixture {
             try context.save()
             return
         }
-        guard scenario == "day" || scenario == "damaged-names" else { return }
+        guard scenario == "day" || scenario == "mainland-day" || scenario == "damaged-names" else { return }
+        let origin = scenario == "mainland-day"
+            ? CLLocationCoordinate2D(latitude: 39.9, longitude: 116.3)
+            : CLLocationCoordinate2D(latitude: 37.3317, longitude: -122.0307)
+        let officeOffset = 0.0105
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         for daysAgo in 0...1 {
@@ -226,7 +230,7 @@ private enum ReviewTestFixture {
 
             func add(_ seconds: Int, offset: Double, mode: TravelMode) {
                 let location = CLLocation(
-                    coordinate: .init(latitude: 37.3317, longitude: -122.0307 + offset),
+                    coordinate: .init(latitude: origin.latitude, longitude: origin.longitude + offset),
                     altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5,
                     timestamp: start.addingTimeInterval(Double(seconds))
                 )
@@ -246,10 +250,10 @@ private enum ReviewTestFixture {
                 add(seconds, offset: 0.003 + Double(seconds - 810) / 20_000, mode: .automotive)
             }
             for seconds in stride(from: 990 + daysAgo * 60, through: 1_890 + daysAgo * 60, by: 30) {
-                add(seconds, offset: 0.0105, mode: .stationary)
+                add(seconds, offset: officeOffset, mode: .stationary)
             }
             for seconds in stride(from: 1_920 + daysAgo * 60, through: 2_100 + daysAgo * 60, by: 30) {
-                add(seconds, offset: 0.0105 - Double(seconds - 1_890 - daysAgo * 60) / 20_000, mode: .automotive)
+                add(seconds, offset: officeOffset - Double(seconds - 1_890 - daysAgo * 60) / 20_000, mode: .automotive)
             }
             for seconds in stride(from: 2_130 + daysAgo * 60, through: 2_730 + daysAgo * 60, by: 30) {
                 add(seconds, offset: 0, mode: .stationary)
@@ -259,8 +263,9 @@ private enum ReviewTestFixture {
             try Data("incomplete".utf8).write(to: directory.appending(path: "place-names.json"))
             names.reload()
         } else {
-            try names.save("测试之家", category: .home, for: .init(latitude: 37.3317, longitude: -122.0307))
-            try names.save("测试办公室", category: .work, for: .init(latitude: 37.3317, longitude: -122.0202))
+            try names.save("测试之家", category: .home, for: origin)
+            try names.save("测试办公室", category: .work,
+                           for: .init(latitude: origin.latitude, longitude: origin.longitude + officeOffset))
         }
         try context.save()
     }
