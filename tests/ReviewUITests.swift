@@ -85,6 +85,46 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(routine.isHittable)
     }
 
+    func testDiscardCurrentAndDeleteLegacyUnfinishedRecord() {
+        let app = launch(fixture: "unfinished")
+        let paused = app.staticTexts["已暂停"]
+        XCTAssertTrue(paused.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "这条记录尚未结束")).firstMatch.exists)
+
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons["回顾选项"].tap()
+        app.buttons["管理记录"].tap()
+        XCTAssertTrue(app.staticTexts["未结束 · 还没有定位点"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        app.tabBars.buttons["记录"].tap()
+
+        let discard = app.buttons["丢弃这次记录"]
+        scrollTo(discard, in: app)
+        discard.tap()
+        app.buttons["取消"].tap()
+        XCTAssertTrue(paused.exists)
+        discard.tap()
+        app.buttons["丢弃记录"].tap()
+        XCTAssertTrue(app.buttons["回看当前路线"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons["回顾选项"].tap()
+        app.buttons["管理记录"].tap()
+        XCTAssertFalse(app.staticTexts["未结束 · 还没有定位点"].exists)
+        let unfinished = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "未结束")).firstMatch
+        XCTAssertTrue(unfinished.waitForExistence(timeout: 5), app.debugDescription)
+        unfinished.swipeLeft()
+        app.buttons["删除"].tap()
+        app.buttons["删除路线"].tap()
+        XCTAssertTrue(app.staticTexts["没有可管理的记录"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        app.tabBars.buttons["记录"].tap()
+        XCTAssertTrue(app.buttons["开始记录"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["开始记录"].waitForExistence(timeout: 5))
+    }
+
     func testPlaceSuggestionRequiresConfirmation() {
         let app = launch(fixture: "suggestions")
         app.tabBars.buttons["回顾"].tap()
@@ -117,7 +157,7 @@ final class ReviewUITests: XCTestCase {
     private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extraArguments
-        app.launchEnvironment = ["LIFEMEM_UI_TEST_FIXTURE": fixture]
+        app.launchEnvironment = ["LIFEMEM_UI_TEST_FIXTURE": fixture, "LIFEMEM_UI_TEST_STORAGE_ID": UUID().uuidString]
         app.launch()
         return app
     }

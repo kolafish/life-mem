@@ -5,7 +5,7 @@ import SwiftUI
 struct RouteHistoryView: View {
     let review: RouteReview?
     let hasRoutes: Bool
-    let summaryIndex: RouteSummaryIndex
+    let recorder: RouteRecorder
 
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -36,9 +36,7 @@ struct RouteHistoryView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if hasRoutes {
-                        Button("管理记录", systemImage: "tray.full") { showsArchive = true }
-                    }
+                    Button("管理记录", systemImage: "tray.full") { showsArchive = true }
                     if placeResolver.isAutomaticEnabled {
                         Button("关闭自动地名", systemImage: "mappin.slash") {
                             placeResolver.setAutomaticEnabled(false)
@@ -80,7 +78,7 @@ struct RouteHistoryView: View {
             Text("请检查设备的可用存储空间后重试。")
         }
         .sheet(isPresented: $showsArchive) {
-            NavigationStack { RouteArchiveView(summaryIndex: summaryIndex) }
+            NavigationStack { RouteArchiveView(recorder: recorder) }
         }
     }
 
@@ -390,15 +388,13 @@ struct RouteDetailView: View {
 }
 
 private struct RouteArchiveView: View {
-    let summaryIndex: RouteSummaryIndex
+    let recorder: RouteRecorder
 
-    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
+    @Query(sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
     @State private var routeToDelete: RecordedRoute?
     @State private var deleteFailed = false
-    @State private var isDeleting = false
 
     var body: some View {
         Group {
@@ -411,11 +407,11 @@ private struct RouteArchiveView: View {
                     } label: {
                         ReviewTextRow(
                             title: route.startedAt.formatted(date: .abbreviated, time: .shortened),
-                            detail: route.isFinished ? route.formattedDistance : "未结束 · \(route.formattedDistance)"
+                            detail: route.isFinished ? route.formattedDistance : "未结束 · \(route.pointCount == 0 ? "还没有定位点" : route.formattedDistance)"
                         )
                     }
                     .swipeActions(allowsFullSwipe: false) {
-                        if route.isFinished {
+                        if recorder.canDelete(route) {
                             Button(role: .destructive) { routeToDelete = route } label: {
                                 Label("删除", systemImage: "trash")
                             }
@@ -441,26 +437,17 @@ private struct RouteArchiveView: View {
         } message: { _ in
             Text("这条路线及其所有日期的定位点将从手机中删除。")
         }
-        .alert("暂时无法删除路线", isPresented: $deleteFailed) { Button("好", role: .cancel) {} }
+        .alert("暂时无法删除路线", isPresented: $deleteFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查设备的可用存储空间后重试。")
+        }
     }
 
     private func delete(_ route: RecordedRoute) async {
-        guard route.isFinished, !isDeleting else { return }
-        isDeleting = true
-        defer { isDeleting = false }
-        let id = route.id
         do {
-            try await summaryIndex.prepareToDelete(routeID: id)
+            try await recorder.delete(route)
         } catch {
-            deleteFailed = true
-            return
-        }
-        context.delete(route)
-        do {
-            try context.save()
-        } catch {
-            context.rollback()
-            await summaryIndex.cancelDeletion(routeID: id)
             deleteFailed = true
         }
     }

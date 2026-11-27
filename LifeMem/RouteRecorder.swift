@@ -14,11 +14,14 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private(set) var state: State = .idle
     private(set) var mode: TravelMode = .unknown
     private(set) var activeRoute: RecordedRoute?
+    private(set) var recoveredUnfinishedRoute = false
+    private(set) var isDeletingRoute = false
     private(set) var needsPreciseLocation = false
     private(set) var locationUnavailable = false
     var notice: String?
 
     private let context: ModelContext
+    private let summaryIndex: RouteSummaryIndex
     private let locationManager = CLLocationManager()
     private let motionManager = CMMotionActivityManager()
     private var recordingStartedAt: Date?
@@ -27,8 +30,9 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private var speedEstimate = SpeedModeEstimate()
     private var recordingID = UUID()
 
-    init(context: ModelContext) {
+    init(context: ModelContext, summaryIndex: RouteSummaryIndex) {
         self.context = context
+        self.summaryIndex = summaryIndex
         super.init()
         locationManager.delegate = self
         locationManager.showsBackgroundLocationIndicator = true
@@ -37,7 +41,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     }
 
     func start() {
-        guard state == .idle || state == .paused else { return }
+        guard !isDeletingRoute, state == .idle || state == .paused else { return }
         switch locationManager.authorizationStatus {
         case .notDetermined:
             state = .requestingPermission
@@ -58,7 +62,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     }
 
     func finish() {
-        guard state == .paused, let route = activeRoute else { return }
+        guard !isDeletingRoute, state == .paused, let route = activeRoute else { return }
         if route.pointCount == 0 {
             context.delete(route)
         } else {
@@ -67,10 +71,41 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         do {
             try context.save()
             activeRoute = nil
+            recoveredUnfinishedRoute = false
             state = .idle
         } catch {
             context.rollback()
             notice = "暂时无法结束这条路线。请检查设备的可用存储空间后重试。"
+        }
+    }
+
+    func canDelete(_ route: RecordedRoute) -> Bool {
+        guard !isDeletingRoute, route.modelContext === context, !route.isDeleted else { return false }
+        return activeRoute?.id != route.id || state == .paused
+    }
+
+    func delete(_ route: RecordedRoute) async throws {
+        guard canDelete(route) else { return }
+        isDeletingRoute = true
+        defer { isDeletingRoute = false }
+
+        let id = route.id
+        let wasActive = activeRoute?.id == id
+        try await summaryIndex.prepareToDelete(routeID: id)
+        context.delete(route)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            await summaryIndex.cancelDeletion(routeID: id)
+            throw error
+        }
+
+        if wasActive {
+            activeRoute = nil
+            recoveredUnfinishedRoute = false
+            state = .idle
+            recoverUnfinishedRoute()
         }
     }
 
@@ -141,7 +176,10 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         request.fetchLimit = 1
         do {
             activeRoute = try context.fetch(request).first
-            if activeRoute != nil { state = .paused }
+            if activeRoute != nil {
+                state = .paused
+                recoveredUnfinishedRoute = true
+            }
         } catch {
             notice = "暂时无法读取未完成的路线。"
         }
@@ -161,6 +199,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
                 return
             }
         }
+        recoveredUnfinishedRoute = false
         state = .recording
         recordingStartedAt = .now
         recordingID = UUID()
