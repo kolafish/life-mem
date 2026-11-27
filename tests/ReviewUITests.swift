@@ -60,6 +60,13 @@ final class ReviewUITests: XCTestCase {
         let ranking = app.staticTexts["常去地点"]
         for _ in 0..<4 where !ranking.isHittable { app.swipeUp() }
         XCTAssertTrue(ranking.isHittable)
+
+        let travel = app.staticTexts["通行效率"]
+        for _ in 0..<4 where !travel.isHittable { app.swipeUp() }
+        XCTAssertTrue(travel.isHittable)
+        let routine = app.staticTexts["离家与回家"]
+        for _ in 0..<4 where !routine.isHittable { app.swipeUp() }
+        XCTAssertTrue(routine.isHittable)
     }
 
     private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {

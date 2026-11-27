@@ -14,6 +14,7 @@
 		AA0000000000000000000018 /* PlaceNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* PlaceNamingView.swift */; };
 		AA0000000000000000000019 /* PlaceResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* PlaceResolver.swift */; };
 		AA000000000000000000001A /* RouteAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000A /* RouteAnalytics.swift */; };
+		AA000000000000000000001C /* RouteBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000C /* RouteBehavior.swift */; };
 		AA000000000000000000001B /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000B /* AnalyticsView.swift */; };
 		AA0000000000000000000081 /* ReviewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* ReviewUITests.swift */; };
 /* End PBXBuildFile section */
@@ -39,6 +40,7 @@
 		AA0000000000000000000008 /* PlaceNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceNamingView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000009 /* PlaceResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceResolver.swift; sourceTree = "<group>"; };
 		AA000000000000000000000A /* RouteAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteAnalytics.swift; sourceTree = "<group>"; };
+		AA000000000000000000000C /* RouteBehavior.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteBehavior.swift; sourceTree = "<group>"; };
 		AA000000000000000000000B /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000080 /* ReviewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = tests/ReviewUITests.swift; sourceTree = "<group>"; };
 		AA0000000000000000000082 /* LifeMemUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LifeMemUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -65,6 +67,7 @@
 				AA0000000000000000000008 /* PlaceNamingView.swift */,
 				AA0000000000000000000009 /* PlaceResolver.swift */,
 				AA000000000000000000000A /* RouteAnalytics.swift */,
+				AA000000000000000000000C /* RouteBehavior.swift */,
 				AA000000000000000000000B /* AnalyticsView.swift */,
 				AA0000000000000000000006 /* Info.plist */,
 			);
@@ -140,6 +143,7 @@
 				AA0000000000000000000018 /* PlaceNamingView.swift in Sources */,
 				AA0000000000000000000019 /* PlaceResolver.swift in Sources */,
 				AA000000000000000000001A /* RouteAnalytics.swift in Sources */,
+				AA000000000000000000001C /* RouteBehavior.swift in Sources */,
 				AA000000000000000000001B /* AnalyticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

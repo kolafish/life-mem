@@ -36,7 +36,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ## 分析
 
-「分析」支持本周、本月和自定义日期。时间分配按已记录的移动和停留统计。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。
+「分析」支持本周、本月和自定义日期。时间分配按已记录的移动和停留统计。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按出发小时展示耗时范围和中位数。「离家与回家」使用和标记为家的停留相连的记录，展示每日首次离家与末次回家。
 
 ## 本地检查
 
@@ -48,7 +48,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ```sh
 mkdir -p DerivedData
-xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift LifeMem/RouteAnalytics.swift tests/RouteChecks.swift -o DerivedData/route-checks
+xcrun swiftc -parse-as-library LifeMem/Routes.swift LifeMem/PlaceResolver.swift LifeMem/RouteAnalytics.swift LifeMem/RouteBehavior.swift tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```
 

@@ -15,6 +15,7 @@ struct AnalyticsView: View {
     @State private var start = Date.now
     @State private var end = Date.now
     @State private var rank = RouteAnalytics.PlaceRanking.visits
+    @State private var selectedPattern: PersistentIdentifier?
 
     private enum Period: String, CaseIterable, Identifiable {
         case week = "本周"
@@ -47,6 +48,7 @@ struct AnalyticsView: View {
                     } else {
                         timeAllocation(data)
                         if !data.places.isEmpty { topPlaces(data) }
+                        behaviorCards(RouteBehavior(review: review, range: dateRange, calendar: calendar, category: names.category(for:)))
                     }
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
@@ -133,6 +135,115 @@ struct AnalyticsView: View {
             }
             .frame(height: 160)
         }
+    }
+
+    @ViewBuilder
+    private func behaviorCards(_ data: RouteBehavior) -> some View {
+        travelEfficiency(data.patterns)
+        homeRoutine(data.routine)
+    }
+
+    private func travelEfficiency(_ patterns: [RouteBehavior.RoutePattern]) -> some View {
+        let pattern = patterns.first { $0.id == selectedPattern } ?? patterns.first
+        return analyticsCard("通行效率") {
+            if let pattern {
+                if patterns.count > 1 {
+                    Picker("路线", selection: Binding(get: { pattern.id }, set: { selectedPattern = $0 })) {
+                        ForEach(Array(patterns.enumerated()), id: \.element.id) { index, route in
+                            Text(patternTitle(route, index: index)).tag(route.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minHeight: 44)
+                } else {
+                    Text(patternTitle(pattern, index: 0)).font(.subheadline.weight(.medium))
+                }
+                let hours = pattern.byHour
+                Chart(hours) { item in
+                    RuleMark(x: .value("出发小时", item.hour),
+                             yStart: .value("最短耗时", item.fastest / 60),
+                             yEnd: .value("最长耗时", item.slowest / 60))
+                        .foregroundStyle(.indigo.opacity(0.5))
+                        .accessibilityHidden(true)
+                    PointMark(x: .value("出发小时", item.hour), y: .value("中位耗时", item.median / 60))
+                        .foregroundStyle(.indigo)
+                        .symbolSize(40)
+                        .accessibilityLabel("\(clockHour(item.hour)) 出发，\(item.count) 次")
+                        .accessibilityValue(routeDuration(item.median))
+                }
+                .chartXScale(domain: 0...23)
+                .chartXAxis {
+                    AxisMarks(values: [0, 6, 12, 18, 23]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let hour = value.as(Int.self) { Text(clockHour(hour)) }
+                        }
+                    }
+                }
+                .chartYAxisLabel("分钟")
+                .frame(height: 165)
+                Text("\(pattern.samples.count) 次行程 · 圆点为中位耗时，竖线为最快至最慢")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let shorter = pattern.shorterDepartureWindow {
+                    Text("已记录中，\(clockHour(shorter.hour)) 时段耗时较短，通常约 \(routeDuration(shorter.median))。")
+                        .font(.subheadline)
+                } else if hours.filter({ $0.count >= 2 }).count < 2 {
+                    Text("两个出发时段各有至少 2 次记录后，可以比较中位耗时。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("同一方向和主要出行方式的相近路线至少记录两次后，会显示耗时对比。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func homeRoutine(_ routine: [RouteBehavior.RoutinePoint]) -> some View {
+        analyticsCard("离家与回家") {
+            if routine.isEmpty {
+                Text("把常住地点设为「家」，记录到从家出发或回家后，就会出现时间点。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Chart(routine) { item in
+                    PointMark(
+                        x: .value("日期", item.day, unit: .day),
+                        y: .value("时刻", item.clockHour)
+                    )
+                    .foregroundStyle(by: .value("记录", item.kind.rawValue))
+                    .symbol(by: .value("记录", item.kind.rawValue))
+                    .accessibilityLabel("\(item.day.formatted(date: .abbreviated, time: .omitted))，\(item.kind.rawValue)")
+                    .accessibilityValue(item.time.formatted(date: .omitted, time: .shortened))
+                }
+                .chartForegroundStyleScale(["首次离家": Color.teal, "末次回家": Color.indigo])
+                .chartYScale(domain: 0...24)
+                .chartYAxis {
+                    AxisMarks(values: [0.0, 6.0, 12.0, 18.0, 24.0]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let hour = value.as(Double.self) { Text(clockHour(Int(hour))) }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.month().day())
+                    }
+                }
+                .frame(height: 200)
+            }
+        }
+    }
+
+    private func clockHour(_ hour: Int) -> String {
+        "\(hour.formatted(.number.precision(.integerLength(2)))):00"
+    }
+
+    private func patternTitle(_ pattern: RouteBehavior.RoutePattern, index: Int) -> String {
+        let start = resolver.label(near: pattern.start, names: names)
+        let end = resolver.label(near: pattern.end, names: names)
+        if start == nil, end == nil { return "路线 \(index + 1) · \(pattern.mode.recordedTitle)" }
+        return "\(start ?? "起点") → \(end ?? "终点") · \(pattern.mode.recordedTitle)"
     }
 
     private func topPlaces(_ data: RouteAnalytics) -> some View {

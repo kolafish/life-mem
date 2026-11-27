@@ -121,6 +121,8 @@ struct RouteReviewEntry: Identifiable {
     let segments: [RouteActivitySegment]
     let endpoints: Endpoints?
     let stay: StayEvent?
+    let departureStay: CLLocationCoordinate2D?
+    let arrivalStay: CLLocationCoordinate2D?
 
     var visitCoordinate: CLLocationCoordinate2D? { stay?.coordinate }
 
@@ -282,11 +284,13 @@ struct RouteReview {
                         let nextVisit = day == lastDay ? nextSlice?.visitCoordinate : nil
                         let leading = slice.visitCoordinate == nil && previousVisit != nil ? previousSlice?.points.last : nil
                         let trailing = slice.visitCoordinate == nil && nextVisit != nil ? nextSlice?.points.first : nil
+                        let sameDayLeading = leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                        let sameDayTrailing = trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
                         let segments = RouteActivitySegment.group(
                             sortedPoints: points,
                             inferModes: slice.visitCoordinate == nil,
-                            leadingStayPoint: leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil },
-                            trailingStayPoint: trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                            leadingStayPoint: sameDayLeading,
+                            trailingStayPoint: sameDayTrailing
                         )
                         let hasMovement = segments.contains { $0.distanceMeters > 0 }
                         let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
@@ -306,7 +310,9 @@ struct RouteReview {
                             followsGap: followsGap,
                             segments: segments,
                             endpoints: endpoints,
-                            stay: stay
+                            stay: stay,
+                            departureStay: sameDayLeading == nil ? nil : previousVisit,
+                            arrivalStay: sameDayTrailing == nil ? nil : nextVisit
                         ))
                     }
                 }
