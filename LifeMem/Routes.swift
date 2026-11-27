@@ -189,6 +189,21 @@ struct MoveEvent: Identifiable {
     var coordinates: [CLLocationCoordinate2D] { activity.coordinates }
 }
 
+struct RouteJourney: Identifiable {
+    struct StayConnection {
+        let coordinate: CLLocationCoordinate2D
+        let time: Date
+    }
+
+    let id: PersistentIdentifier
+    let endpoints: RouteReviewEntry.Endpoints
+    let departedAt: Date
+    let duration: TimeInterval
+    let mode: TravelMode
+    let departureStay: StayConnection?
+    let arrivalStay: StayConnection?
+}
+
 struct RouteVisit: Identifiable {
     let id: PersistentIdentifier
     let date: Date
@@ -243,11 +258,13 @@ struct RouteReview {
 
     let days: [RouteReviewDay]
     let places: [RoutePlace]
+    let journeys: [RouteJourney]
 
     init(routes: [RecordedRoute], calendar: Calendar) {
         var entriesByDay: [Date: [RouteReviewEntry]] = [:]
         var midnightMovement: [Date: RouteReviewDay.Movement] = [:]
         var visits: [RouteVisit] = []
+        var journeys: [RouteJourney] = []
         for route in routes {
             let points = route.points.sorted { $0.timestamp < $1.timestamp }
             for (index, run) in Self.cleanRuns(points).enumerated() {
@@ -260,6 +277,10 @@ struct RouteReview {
                     let last = slice.points[slice.points.endIndex - 1]
                     let previousSlice = sliceIndex > 0 ? slices[sliceIndex - 1] : nil
                     let nextSlice = sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
+                    let previousCoordinate = previousSlice?.visitCoordinate
+                    let nextCoordinate = nextSlice?.visitCoordinate
+                    let leading = slice.visitCoordinate == nil && previousCoordinate != nil ? previousSlice?.points.last : nil
+                    let trailing = slice.visitCoordinate == nil && nextCoordinate != nil ? nextSlice?.points.first : nil
                     if let visit = slice.visitCoordinate {
                         visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
                     } else {
@@ -269,25 +290,30 @@ struct RouteReview {
                                 Self.allocateMidnightEdge(from: from, to: to, calendar: calendar, totals: &midnightMovement)
                             }
                         }
-                        if previousSlice?.visitCoordinate != nil, let from = previousSlice?.points.last, first.mode != .stationary {
+                        if let from = leading, first.mode != .stationary {
                             Self.allocateMidnightEdge(from: from, to: first, calendar: calendar, totals: &midnightMovement)
                         }
-                        if nextSlice?.visitCoordinate != nil, let to = nextSlice?.points.first, last.mode != .stationary {
+                        if let to = trailing, last.mode != .stationary {
                             Self.allocateMidnightEdge(from: last, to: to, calendar: calendar, totals: &midnightMovement)
                         }
                     }
+                    var completeSegments: [RouteActivitySegment]?
                     for (day, points) in pointsByDay {
                         let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
-                        let previousVisit = day == firstDay ? previousSlice?.visitCoordinate : nil
-                        let nextVisit = day == lastDay ? nextSlice?.visitCoordinate : nil
-                        let leading = slice.visitCoordinate == nil && previousVisit != nil ? previousSlice?.points.last : nil
-                        let trailing = slice.visitCoordinate == nil && nextVisit != nil ? nextSlice?.points.first : nil
+                        let previousVisit = day == firstDay ? previousCoordinate : nil
+                        let nextVisit = day == lastDay ? nextCoordinate : nil
+                        let sameDayLeading = leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                        let sameDayTrailing = trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
                         let segments = RouteActivitySegment.group(
                             sortedPoints: points,
                             inferModes: slice.visitCoordinate == nil,
-                            leadingStayPoint: leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil },
-                            trailingStayPoint: trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                            leadingStayPoint: sameDayLeading,
+                            trailingStayPoint: sameDayTrailing
                         )
+                        if slice.visitCoordinate == nil, firstDay == lastDay, leading?.timestamp == sameDayLeading?.timestamp,
+                           trailing?.timestamp == sameDayTrailing?.timestamp {
+                            completeSegments = segments
+                        }
                         let hasMovement = segments.contains { $0.distanceMeters > 0 }
                         let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
                         let endpoints = kind == .trip ? Self.endpoints(in: segments, previousVisit: previousVisit, nextVisit: nextVisit) : nil
@@ -309,6 +335,19 @@ struct RouteReview {
                             stay: stay
                         ))
                     }
+
+                    if slice.visitCoordinate == nil {
+                        let segments = completeSegments ?? RouteActivitySegment.group(
+                            sortedPoints: Array(slice.points), inferModes: true,
+                            leadingStayPoint: leading, trailingStayPoint: trailing
+                        )
+                        let arrival = trailing.flatMap { point in
+                            nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
+                        }
+                        if let journey = Self.journey(in: segments, departure: previousCoordinate, arrival: arrival) {
+                            journeys.append(journey)
+                        }
+                    }
                 }
             }
         }
@@ -320,6 +359,28 @@ struct RouteReview {
             )
         }
         places = RoutePlace.group(visits, within: Self.placeRadius)
+        self.journeys = journeys
+    }
+
+    private static func journey(
+        in segments: [RouteActivitySegment],
+        departure: CLLocationCoordinate2D?,
+        arrival: RouteJourney.StayConnection?
+    ) -> RouteJourney? {
+        let moving = segments.filter { $0.distanceMeters > 0 }
+        guard let first = moving.first, let last = moving.last,
+              let endpoints = endpoints(in: moving, previousVisit: departure, nextVisit: arrival?.coordinate) else { return nil }
+        let seconds = last.endedAt.timeIntervalSince(first.movementStartedAt)
+        guard seconds > 0 else { return nil }
+        let durations = moving.reduce(into: [TravelMode: TimeInterval]()) {
+            $0[$1.mode, default: 0] += $1.endedAt.timeIntervalSince($1.movementStartedAt)
+        }
+        let mode = TravelMode.allCases.max { durations[$0, default: 0] < durations[$1, default: 0] } ?? .unknown
+        return RouteJourney(
+            id: first.id, endpoints: endpoints, departedAt: first.startedAt, duration: seconds, mode: mode,
+            departureStay: departure.map { RouteJourney.StayConnection(coordinate: $0, time: first.startedAt) },
+            arrivalStay: arrival
+        )
     }
 
     private static func allocateMidnightEdge(

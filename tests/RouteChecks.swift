@@ -87,6 +87,7 @@ struct RouteChecks {
         precondition(segments[2].coordinates.count == 1)
         try checkReview(context: context)
         try checkSemanticTimeline(context: context)
+        try checkBehavior(context: context)
         try checkPlaceNames(in: root)
         try await checkPlaceResolver(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
@@ -292,6 +293,92 @@ struct RouteChecks {
         let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day) { _ in nil }
         precondition(ranked.topPlaces(by: .visits).first?.visits == 2)
         precondition(ranked.topPlaces(by: .duration).first?.seconds == 1_200)
+    }
+
+    @MainActor
+    private static func checkBehavior(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let firstDay = calendar.date(from: DateComponents(year: 2026, month: 11, day: 20))!
+        var routes: [RecordedRoute] = []
+        for index in 0..<4 {
+            let hour = index < 2 ? 8 : 9
+            let day = calendar.date(byAdding: .day, value: index, to: firstDay)!
+            let start = calendar.date(byAdding: .hour, value: hour, to: day)!
+            let transit = index < 2 ? 120 : 240
+            let outbound: [Sample] = stride(from: 30, to: transit, by: 30).map { offset in
+                (480 + Double(offset), (offset == 30 ? 0.0002 : 0.01 * Double(offset) / Double(transit)), offset == 30 ? .walking : .automotive, offset == 30)
+            }
+            let arrive = 480 + Double(transit)
+            var samples = stop(start: 0, longitude: 0) + outbound + stop(start: arrive, longitude: 0.01)
+            if index == 0 {
+                samples += [(arrive + 510, 0.005, .automotive, true)]
+                    + stop(start: arrive + 540, longitude: 0)
+            }
+            routes.append(insertRoute(context: context, start: start, samples: samples))
+        }
+        let lastDay = calendar.date(byAdding: .day, value: 4, to: firstDay)!
+        let disconnected = stop(start: 0, longitude: 0) + [
+            (510, 0.001, .walking, true), (540, 0.002, .walking, false)
+        ]
+        let pausedRoute = insertRoute(context: context, start: lastDay, samples: disconnected)
+        for point in pausedRoute.points where point.timestamp == lastDay.addingTimeInterval(510) {
+            point.startsRecordingRun = true
+        }
+        routes.append(pausedRoute)
+        let walkingDay = calendar.date(byAdding: .day, value: 1, to: lastDay)!
+        var walking: [Sample] = []
+        for offset in stride(from: 510, to: 1_080, by: 30) {
+            let longitude = Double(offset - 480) / 60_000
+            walking.append((Double(offset), longitude, .walking, offset == 510))
+        }
+        routes.append(insertRoute(context: context, start: walkingDay,
+                                  samples: stop(start: 0, longitude: 0) + walking + stop(start: 1_080, longitude: 0.01)))
+        try context.save()
+
+        let review = RouteReview(routes: routes, calendar: calendar)
+        let behavior = RouteBehavior(review: review, range: firstDay...walkingDay, calendar: calendar) { coordinate in
+            abs(coordinate.longitude) < 0.0005 ? .home : .work
+        }
+        precondition(behavior.patterns.count == 1 && behavior.patterns[0].samples.count == 4)
+        let commute = behavior.patterns[0]
+        precondition(commute.byHour.map(\.hour) == [8, 9])
+        precondition(commute.byHour.map(\.median) == [120, 240])
+        precondition(commute.mode == .automotive && commute.shorterDepartureWindow?.hour == 8)
+        precondition(behavior.routine.filter { $0.kind == .departure }.count == 5)
+        precondition(behavior.routine.filter { $0.kind == .arrival }.count == 1)
+        precondition(behavior.routine.allSatisfy { $0.day != lastDay })
+
+        let sparse = RouteBehavior(review: review, range: firstDay...firstDay, calendar: calendar) { _ in nil }
+        precondition(sparse.patterns.isEmpty && sparse.routine.isEmpty)
+
+        let midnight = firstDay.addingTimeInterval(86_400)
+        let otherMidnight = midnight.addingTimeInterval(86_400)
+        let acrossMidnight: [Sample] = [
+            (0, 0.03, .automotive, true), (40, 0.031, .automotive, false),
+            (60, 0.032, .automotive, false), (100, 0.033, .automotive, false)
+        ]
+        let repeatedOvernight = [midnight, otherMidnight].map {
+            insertRoute(context: context, start: $0.addingTimeInterval(-50), samples: acrossMidnight)
+        }
+        let midnightDeparture = insertRoute(
+            context: context, start: midnight.addingTimeInterval(-490),
+            samples: stop(start: 0, longitude: 0) + [(500, 0.0004, .walking, true), (520, 0.0006, .walking, false)]
+        )
+        let midnightArrival = insertRoute(
+            context: context, start: midnight.addingTimeInterval(-40),
+            samples: [(0, 0.001, .walking, true), (30, 0.0004, .walking, false)] + stop(start: 50, longitude: 0)
+        )
+        try context.save()
+        let overnightReview = RouteReview(routes: repeatedOvernight + [midnightDeparture, midnightArrival], calendar: calendar)
+        let overnightEfficiency = RouteBehavior(review: overnightReview, range: firstDay...otherMidnight, calendar: calendar) { _ in nil }
+        precondition(overnightEfficiency.patterns.count == 1)
+        precondition(overnightEfficiency.patterns[0].samples.map(\.duration) == [100, 100])
+        let overnightRoutine = RouteBehavior(review: overnightReview, range: midnight...midnight, calendar: calendar) {
+            abs($0.longitude) < 0.0001 ? .home : nil
+        }
+        precondition(Set(overnightRoutine.routine.map(\.kind)) == [.departure, .arrival])
+        precondition(overnightRoutine.routine.allSatisfy { $0.day == midnight && $0.time == midnight.addingTimeInterval(10) })
     }
 
     @MainActor
