@@ -11,11 +11,23 @@ struct LocationPoint<ID: Hashable> {
     let startsRecordingRun: Bool?
 }
 
+struct StoredCoordinate: Codable, Sendable {
+    let latitude: Double
+    let longitude: Double
+
+    init(_ coordinate: CLLocationCoordinate2D) {
+        latitude = coordinate.latitude
+        longitude = coordinate.longitude
+    }
+
+    var coordinate: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
+}
+
 extension CLLocationCoordinate2D {
     var location: CLLocation { CLLocation(latitude: latitude, longitude: longitude) }
 }
 
-enum TravelMode: String, CaseIterable {
+enum TravelMode: String, CaseIterable, Codable, Sendable {
     case unknown, walking, automotive, cycling, stationary
 
     static func estimated(metersPerSecond: CLLocationSpeed) -> Self {

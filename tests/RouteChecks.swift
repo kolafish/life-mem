@@ -91,6 +91,7 @@ struct RouteChecks {
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
         try checkPlaceNames(in: root)
+        try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
@@ -356,6 +357,60 @@ struct RouteChecks {
         let afterChange = cache.review(routes: [stay], calendar: automatic)
         precondition(afterChange.days[0].date == automatic.startOfDay(for: stay.startedAt))
         precondition(beforeChange.days[0].date != afterChange.days[0].date)
+    }
+
+    @MainActor
+    private static func checkSummaryIndex(context: ModelContext, directory: URL) async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let start = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_006_400))
+        let next = calendar.date(byAdding: .day, value: 1, to: start)!
+        let walk = insertRoute(context: context, start: next.addingTimeInterval(-30), samples: [
+            (0, 0, .walking, true), (20, 0.0003, .walking, false),
+            (40, 0.0006, .walking, false), (60, 0.0009, .walking, false)
+        ])
+        let stay = insertRoute(context: context, start: next.addingTimeInterval(-120), samples: stop(start: 0, longitude: 0.01))
+        try context.save()
+        let routes = [walk, stay]
+        let original = RouteReview(routes: routes, calendar: calendar)
+        let cache = RouteReviewCache()
+        let revision = RouteReviewRevision(calendar: calendar, routes: routes)
+        let file = directory.appending(path: "daily-summary.json")
+        let index = RouteSummaryIndex(file: file)
+        let records = cache.summaries(for: routes, revision: revision, indexed: [:])
+        await index.save(records, for: revision)
+
+        let reopened = RouteSummaryIndex(file: file)
+        let loaded = await reopened.records(for: revision)
+        let summary = RouteSummary(records: revision.routes.compactMap { loaded[$0] })
+        precondition(loaded.count == 2 && summary.days.map(\.movingDuration) == original.days.map(\.movingDuration))
+        precondition(summary.places.map(\.id) == original.places.map(\.id))
+        precondition(summary.journeys.map(\.duration) == original.journeys.map(\.duration))
+        precondition(summary.days.flatMap(\.stays).map(\.visitID) == original.days.flatMap(\.stays).map(\.visitID))
+
+        let fix = location(longitude: 0.0012, at: walk.startedAt.addingTimeInterval(80))
+        context.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: false, route: walk))
+        walk.pointCount += 1
+        try context.save()
+        let changed = RouteReviewRevision(calendar: calendar, routes: routes)
+        let retained = await reopened.records(for: changed)
+        precondition(retained.count == 1 && retained[changed.routes[1]] != nil)
+        let updated = RouteReviewCache().summaries(for: routes, revision: changed, indexed: retained)
+        let afterAppend = RouteSummary(records: changed.routes.compactMap { updated[$0] })
+        precondition(afterAppend.days.map(\.movingDuration) == [50, 30])
+
+        let afterDeletion = RouteReviewRevision(calendar: calendar, routes: [stay])
+        let surviving = await reopened.records(for: afterDeletion)
+        await reopened.save(surviving, for: afterDeletion)
+        let pruned = await RouteSummaryIndex(file: file).records(for: revision)
+        precondition(pruned.count == 1 && pruned[revision.routes[0]] == nil)
+
+        calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3_600)!
+        let shifted = await reopened.records(for: RouteReviewRevision(calendar: calendar, routes: [stay]))
+        precondition(shifted.isEmpty)
+        try Data("invalid".utf8).write(to: file)
+        let corrupt = await RouteSummaryIndex(file: file).records(for: revision)
+        precondition(corrupt.isEmpty)
     }
 
     @MainActor

@@ -7,9 +7,17 @@ typealias RouteActivitySegment = ActivitySegment<PersistentIdentifier>
 struct RouteReviewEntry: Identifiable {
     enum Kind { case trip, visit, fragment }
 
-    struct Endpoints {
-        let start: CLLocationCoordinate2D
-        let end: CLLocationCoordinate2D
+    struct Endpoints: Codable, Sendable {
+        private let origin: StoredCoordinate
+        private let destination: StoredCoordinate
+
+        var start: CLLocationCoordinate2D { origin.coordinate }
+        var end: CLLocationCoordinate2D { destination.coordinate }
+
+        init(start: CLLocationCoordinate2D, end: CLLocationCoordinate2D) {
+            origin = StoredCoordinate(start)
+            destination = StoredCoordinate(end)
+        }
     }
 
     var id: PersistentIdentifier { segments[0].id }
@@ -39,6 +47,7 @@ struct RouteReviewDay: Identifiable {
     struct Movement {
         var duration: TimeInterval = 0
         var distance: CLLocationDistance = 0
+        var intervals: [DateInterval] = []
     }
 
     var id: Date { date }
@@ -52,6 +61,9 @@ struct RouteReviewDay: Identifiable {
     var moves: [MoveEvent] { entries.flatMap(\.moves) }
     var movingDistanceMeters: CLLocationDistance { moves.reduce(midnightMovement.distance) { $0 + $1.distanceMeters } }
     var movingDuration: TimeInterval { moves.reduce(midnightMovement.duration) { $0 + $1.duration } }
+    var movementIntervals: [DateInterval] {
+        moves.map { DateInterval(start: $0.startedAt, end: $0.endedAt) } + midnightMovement.intervals
+    }
 }
 
 enum TimelineSegment: Identifiable {
@@ -66,14 +78,23 @@ enum TimelineSegment: Identifiable {
     }
 }
 
-struct StayEvent: Identifiable {
+struct StayEvent: Identifiable, Codable, Sendable {
     let id: PersistentIdentifier
     let visitID: PersistentIdentifier
-    let coordinate: CLLocationCoordinate2D
+    private let position: StoredCoordinate
     let startedAt: Date
     let endedAt: Date
 
+    var coordinate: CLLocationCoordinate2D { position.coordinate }
     var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
+
+    init(id: PersistentIdentifier, visitID: PersistentIdentifier, coordinate: CLLocationCoordinate2D, startedAt: Date, endedAt: Date) {
+        self.id = id
+        self.visitID = visitID
+        position = StoredCoordinate(coordinate)
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+    }
 }
 
 struct MoveEvent: Identifiable {
@@ -89,10 +110,17 @@ struct MoveEvent: Identifiable {
     var coordinates: [CLLocationCoordinate2D] { activity.coordinates }
 }
 
-struct RouteJourney: Identifiable {
-    struct StayConnection {
-        let coordinate: CLLocationCoordinate2D
+struct RouteJourney: Identifiable, Codable, Sendable {
+    struct StayConnection: Codable, Sendable {
+        private let position: StoredCoordinate
         let time: Date
+
+        var coordinate: CLLocationCoordinate2D { position.coordinate }
+
+        init(coordinate: CLLocationCoordinate2D, time: Date) {
+            position = StoredCoordinate(coordinate)
+            self.time = time
+        }
     }
 
     let id: PersistentIdentifier
@@ -104,12 +132,22 @@ struct RouteJourney: Identifiable {
     let arrivalStay: StayConnection?
 }
 
-struct RouteVisit: Identifiable {
+struct RouteVisit: Identifiable, Codable, Sendable {
     let id: PersistentIdentifier
     let date: Date
     let startedAt: Date
     let endedAt: Date
-    let coordinate: CLLocationCoordinate2D
+    private let position: StoredCoordinate
+
+    var coordinate: CLLocationCoordinate2D { position.coordinate }
+
+    init(id: PersistentIdentifier, date: Date, startedAt: Date, endedAt: Date, coordinate: CLLocationCoordinate2D) {
+        self.id = id
+        self.date = date
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        position = StoredCoordinate(coordinate)
+    }
 }
 
 struct RoutePlace: Identifiable {

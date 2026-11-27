@@ -45,7 +45,7 @@ struct LifeMemApp: App {
         WindowGroup {
             switch storage {
             case let .success(container):
-                RootView(context: container.mainContext)
+                RootView(context: container.mainContext, summaryFile: Self.storageDirectory.appending(path: "daily-summary.json"))
                     .modelContainer(container)
                     .environment(placeNames)
                     .environment(placeResolver)
@@ -65,6 +65,11 @@ private struct RootView: View {
         case record, review, analytics
     }
 
+    private struct Request: Equatable {
+        let tab: Tab
+        let revision: RouteReviewRevision
+    }
+
     @Environment(\.calendar) private var calendar
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
@@ -72,13 +77,16 @@ private struct RootView: View {
     @State private var selection = Tab.record
     @State private var review: RouteReview?
     @State private var reviewCache = RouteReviewCache()
+    @State private var summary: RouteSummary?
+    @State private var index: RouteSummaryIndex
 
-    init(context: ModelContext) {
+    init(context: ModelContext, summaryFile: URL) {
+        _index = State(initialValue: RouteSummaryIndex(file: summaryFile))
         _recorder = State(initialValue: RouteRecorder(context: context))
     }
 
     var body: some View {
-        let revision = selection == .record ? nil : RouteReviewRevision(calendar: calendar, routes: routes)
+        let request = selection == .record ? nil : Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
         TabView(selection: $selection) {
             NavigationStack {
                 RecordView(recorder: recorder)
@@ -93,15 +101,23 @@ private struct RootView: View {
             .tag(Tab.review)
 
             NavigationStack {
-                AnalyticsView(review: review)
+                AnalyticsView(summary: summary)
             }
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
         }
         .tint(.indigo)
-        .task(id: revision) {
-            guard revision != nil, !Task.isCancelled else { return }
-            review = reviewCache.review(routes: routes, calendar: calendar)
+        .task(id: request) {
+            guard let request, !Task.isCancelled else { return }
+            if request.tab == .review {
+                review = reviewCache.review(routes: routes, calendar: request.revision.calendar)
+            }
+            let indexed = await index.records(for: request.revision)
+            guard !Task.isCancelled,
+                  request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
+            let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
+            summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] })
+            await index.save(records, for: request.revision)
         }
         .alert("Life Mem", isPresented: Binding(
             get: { recorder.notice != nil },

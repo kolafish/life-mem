@@ -36,7 +36,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ## 分析
 
-「分析」支持本周、本月和自定义日期。「已记录时间分配」汇总观测到的移动和停留。回顾和分析共享本次打开 App 后已解析的路线，新增定位点时只重新解析有变化的路线。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按首次观测到移动的日期和小时归类，展示整趟行程的耗时范围和中位数。「离家与回家」使用和标记为家的停留相连的记录，展示每日首次离家与末次回家。
+「分析」支持本周、本月和自定义日期。「已记录时间分配」汇总观测到的移动和停留。回顾与分析复用已解析的路线。分析可以从本机每日摘要直接打开，追加、删除或时区变化后会按当前数据刷新。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按首次观测到移动的日期和小时归类，展示整趟行程的耗时范围和中位数。「离家与回家」使用和标记为家的停留相连的记录，展示每日首次离家与末次回家。
 
 ## 本地检查
 
@@ -49,7 +49,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 ```sh
 mkdir -p DerivedData
 xcrun swiftc -parse-as-library \
-  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,SavedPlace,PlaceResolver,RouteAnalytics,RouteBehavior}.swift \
+  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,RouteAnalytics,RouteBehavior}.swift \
   tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```

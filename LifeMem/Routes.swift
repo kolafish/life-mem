@@ -2,14 +2,14 @@ import CoreLocation
 import Foundation
 import SwiftData
 
-struct RouteReviewRevision: Hashable {
-    fileprivate struct RouteVersion: Hashable {
+struct RouteReviewRevision: Hashable, Sendable {
+    struct RouteVersion: Hashable, Codable, Sendable {
         let id: UUID
         let pointCount: Int
     }
 
     let calendar: Calendar
-    fileprivate let routes: [RouteVersion]
+    let routes: [RouteVersion]
 
     init(calendar: Calendar, routes: [RecordedRoute]) {
         // Freeze the effective settings before storing a key built from an autoupdating calendar.
@@ -26,13 +26,14 @@ struct RouteReviewRevision: Hashable {
 @MainActor
 final class RouteReviewCache {
     private var revision: RouteReviewRevision?
+    private var contributionCalendar: Calendar?
     private var contributions: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
     private var snapshot: RouteReview?
 
     func review(routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
         let current = RouteReviewRevision(calendar: calendar, routes: routes)
         if revision == current, let snapshot { return snapshot }
-        if revision?.calendar != current.calendar { contributions.removeAll() }
+        selectCalendar(current.calendar)
 
         var retained: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
         let ordered = zip(routes, current.routes).map { route, version in
@@ -45,6 +46,30 @@ final class RouteReviewCache {
         revision = current
         snapshot = result
         return result
+    }
+
+    func summaries(
+        for routes: [RecordedRoute],
+        revision: RouteReviewRevision,
+        indexed: [RouteReviewRevision.RouteVersion: RouteSummaryRecord]
+    ) -> [RouteReviewRevision.RouteVersion: RouteSummaryRecord] {
+        selectCalendar(revision.calendar)
+        let active = Set(revision.routes)
+        contributions = contributions.filter { active.contains($0.key) }
+        return zip(routes, revision.routes).reduce(into: indexed) { records, pair in
+            let (route, version) = pair
+            guard records[version] == nil else { return }
+            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar)
+            contributions[version] = contribution
+            records[version] = contribution.summary
+        }
+    }
+
+    private func selectCalendar(_ calendar: Calendar) {
+        if contributionCalendar != calendar {
+            contributions.removeAll()
+            contributionCalendar = calendar
+        }
     }
 }
 
@@ -60,6 +85,13 @@ struct RouteReview {
         var midnightMovement: [Date: RouteReviewDay.Movement] = [:]
         var visits: [RouteVisit] = []
         var journeys: [RouteJourney] = []
+
+        var summary: RouteSummaryRecord {
+            let days = entriesByDay.map { date, entries in
+                DailySummary(day: RouteReviewDay(date: date, entries: entries, midnightMovement: midnightMovement[date, default: .init()]))
+            }
+            return RouteSummaryRecord(days: days, visits: visits, journeys: journeys)
+        }
     }
 
     init(routes: [RecordedRoute], calendar: Calendar) {
@@ -76,6 +108,7 @@ struct RouteReview {
             for (date, movement) in contribution.midnightMovement {
                 midnightMovement[date, default: .init()].duration += movement.duration
                 midnightMovement[date, default: .init()].distance += movement.distance
+                midnightMovement[date, default: .init()].intervals += movement.intervals
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -210,8 +243,12 @@ struct RouteReview {
         guard distance > 0 else { return }
         let seconds = second.timestamp.timeIntervalSince(first.timestamp)
         let before = endDay.timeIntervalSince(first.timestamp)
+        totals[startDay, default: .init()].intervals.append(DateInterval(start: first.timestamp, end: endDay))
         totals[startDay, default: .init()].duration += before
         totals[startDay, default: .init()].distance += distance * before / seconds
+        if second.timestamp > endDay {
+            totals[endDay, default: .init()].intervals.append(DateInterval(start: endDay, end: second.timestamp))
+        }
         totals[endDay, default: .init()].duration += seconds - before
         totals[endDay, default: .init()].distance += distance * (seconds - before) / seconds
     }
