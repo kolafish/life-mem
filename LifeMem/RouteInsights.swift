@@ -1,8 +1,8 @@
 import CoreLocation
 import Foundation
 
-struct RouteInsights {
-    struct FrequentRoute: Identifiable {
+struct RouteInsights: Sendable {
+    struct FrequentRoute: Identifiable, Sendable {
         let pattern: RouteBehavior.RoutePattern
         let count: Int
         let average: TimeInterval
@@ -12,7 +12,7 @@ struct RouteInsights {
         var id: RouteBehavior.RoutePattern.ID { pattern.id }
     }
 
-    struct CommuteChange {
+    struct CommuteChange: Sendable {
         let pattern: RouteBehavior.RoutePattern
         let average: TimeInterval
         let previousAverage: TimeInterval
@@ -21,7 +21,7 @@ struct RouteInsights {
         let fastestSample: RouteBehavior.TravelSample
     }
 
-    struct HomeShare {
+    struct HomeShare: Sendable {
         let share: Double
         let trackedDuration: TimeInterval
         let elapsedDuration: TimeInterval
@@ -35,7 +35,7 @@ struct RouteInsights {
 
     init(
         summary: RouteSummary, analytics: RouteAnalytics, range: ClosedRange<Date>, calendar: Calendar,
-        now: Date = .now, patterns: [RouteBehavior.RoutePattern], hasHome: Bool,
+        now: Date = .now, patterns: [RouteBehavior.RoutePattern], hasHome: Bool, priorHomeShare: Double?,
         category: (CLLocationCoordinate2D) -> PlaceCategory?
     ) {
         let start = calendar.startOfDay(for: range.lowerBound)
@@ -88,18 +88,18 @@ struct RouteInsights {
         }.count
 
         if hasHome, let share = Self.recordedHomeShare(analytics) {
-            let prior = calendar.date(byAdding: .day, value: -30, to: start).flatMap { priorStart in
-                calendar.date(byAdding: .day, value: -1, to: start).flatMap { priorEnd in
-                    Self.recordedHomeShare(RouteAnalytics(
-                        summary: summary, range: priorStart...priorEnd, calendar: calendar, now: start, category: category
-                    ))
-                }
-            }
             home = HomeShare(share: share, trackedDuration: analytics.trackedDuration,
-                             elapsedDuration: analytics.elapsedDuration, previousShare: prior)
+                             elapsedDuration: analytics.elapsedDuration, previousShare: priorHomeShare)
         } else {
             home = nil
         }
+    }
+
+    static func homeShareBefore(_ start: Date, summary: RouteSummary, calendar: Calendar,
+                                category: (CLLocationCoordinate2D) -> PlaceCategory?) -> Double? {
+        guard let priorStart = calendar.date(byAdding: .day, value: -30, to: start),
+              let priorEnd = calendar.date(byAdding: .day, value: -1, to: start) else { return nil }
+        return RouteAnalytics.homeShare(in: summary, range: priorStart...priorEnd, calendar: calendar, category: category)
     }
 
     static func routePatterns(in journeys: [RouteJourney], calendar: Calendar) -> [RouteBehavior.RoutePattern] {

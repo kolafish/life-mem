@@ -81,6 +81,7 @@ private struct RootView: View {
     @State private var review: RouteReview?
     @State private var reviewCache = RouteReviewCache()
     @State private var summary: RouteSummary?
+    @State private var summaryRevision: RouteReviewRevision?
     @State private var index: RouteSummaryIndex
 
     init(context: ModelContext, summaryFile: URL) {
@@ -105,7 +106,7 @@ private struct RootView: View {
             .tag(Tab.review)
 
             NavigationStack {
-                AnalyticsView(summary: summary)
+                AnalyticsView(summary: summary, isSelected: selection == .analytics)
             }
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
@@ -120,7 +121,10 @@ private struct RootView: View {
             guard !Task.isCancelled,
                   request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
             let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
-            summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] })
+            if summaryRevision != request.revision {
+                summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] })
+                summaryRevision = request.revision
+            }
             await index.save(records, for: request.revision, after: .seconds(1))
         }
         .alert("Life Mem", isPresented: Binding(

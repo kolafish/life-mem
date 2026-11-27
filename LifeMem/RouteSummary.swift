@@ -34,7 +34,7 @@ struct RouteSummaryRecord: Codable, Sendable {
     }
 }
 
-struct RouteSummary {
+struct RouteSummary: Sendable {
     let id = UUID()
     let days: [DailySummary]
     let places: [RoutePlace]

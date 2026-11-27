@@ -92,7 +92,7 @@ struct RouteChecks {
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
-        try checkInsights(context: context)
+        try await checkInsights(context: context, directory: root)
         try checkPlaceSuggestions(context: context)
         try checkPlaceNames(in: root)
         try await checkSummaryIndex(context: context, directory: root)
@@ -567,7 +567,7 @@ struct RouteChecks {
     }
 
     @MainActor
-    private static func checkInsights(context: ModelContext) throws {
+    private static func checkInsights(context: ModelContext, directory: URL) async throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let week = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
@@ -622,8 +622,9 @@ struct RouteChecks {
         let range = week...upper
         let patterns = RouteInsights.routePatterns(in: journeys, calendar: calendar)
         let analytics = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: category)
+        let priorShare = RouteInsights.homeShareBefore(week, summary: summary, calendar: calendar, category: category)
         let insights = RouteInsights(summary: summary, analytics: analytics, range: range, calendar: calendar, now: now,
-                                     patterns: patterns, hasHome: true, category: category)
+                                     patterns: patterns, hasHome: true, priorHomeShare: priorShare, category: category)
         precondition(insights.newPlaceCount == 1 && insights.home?.share == 1)
         precondition(insights.home?.previousShare == 480.0 / 540.0)
         precondition(insights.home?.trackedDuration == 480 && insights.home?.elapsedDuration == 3 * 86_400)
@@ -635,8 +636,42 @@ struct RouteChecks {
         let singleDay = week...week
         let singleDayAnalytics = RouteAnalytics(summary: summary, range: singleDay, calendar: calendar, now: now, category: category)
         let sparse = RouteInsights(summary: summary, analytics: singleDayAnalytics, range: singleDay,
-                                   calendar: calendar, now: now, patterns: patterns, hasHome: false, category: category)
+                                   calendar: calendar, now: now, patterns: patterns, hasHome: false, priorHomeShare: nil, category: category)
         precondition(sparse.commute == nil && sparse.routes.isEmpty && sparse.home == nil)
+
+        let names = RoutePlaceNames(file: directory.appending(path: "analysis-place-names.json"))
+        try names.save("家", category: .home, for: home)
+        try names.save("公司", category: .work, for: work)
+        let worker = RouteAnalysisWorker()
+        func report(for range: ClosedRange<Date>, at date: Date) async -> RouteAnalysisReport? {
+            let places = names.snapshot
+            let scope = RouteAnalysisRequest.Scope(summaryID: summary.id, placesRevision: places.revision, calendar: calendar, range: range)
+            return await worker.report(for: .init(scope: scope, now: date), summary: summary, places: places)
+        }
+        let firstReport = await report(for: range, at: now)
+        precondition(firstReport?.analytics.trackedDuration == analytics.trackedDuration)
+        precondition(firstReport?.insights?.home?.previousShare == insights.home?.previousShare)
+        precondition(firstReport?.insights?.commute?.average == insights.commute?.average)
+        precondition(firstReport?.placesByVisits.map(\.id) == analytics.topPlaces(by: .visits).map(\.id))
+        let later = await report(for: range, at: now.addingTimeInterval(60))
+        precondition(later?.analytics.elapsedDuration == analytics.elapsedDuration + 60)
+        let filtered = await report(for: singleDay, at: now)
+        precondition(filtered?.scope.range == singleDay && filtered?.insights?.routes.isEmpty == true)
+        try names.save("休闲", category: .leisure, for: home)
+        let reclassified = await report(for: range, at: now)
+        precondition(reclassified?.scope.placesRevision != firstReport?.scope.placesRevision)
+        precondition(reclassified?.insights?.home == nil && reclassified?.insights?.commute == nil)
+
+        let cancelled = Task { await report(for: range, at: now) }
+        cancelled.cancel()
+        let cancelledReport = await cancelled.value
+        precondition(cancelledReport == nil)
+
+        let empty = RouteSummary(records: [])
+        let places = names.snapshot
+        let emptyScope = RouteAnalysisRequest.Scope(summaryID: empty.id, placesRevision: places.revision, calendar: calendar, range: range)
+        let cleared = await worker.report(for: .init(scope: emptyScope, now: now), summary: empty, places: places)
+        precondition(cleared?.analytics.trackedDuration == 0 && cleared?.behavior == nil)
     }
 
     @MainActor
