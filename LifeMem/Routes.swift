@@ -26,7 +26,7 @@ final class RecordedRoute {
 
 struct RouteActivitySegment: Identifiable {
     let id: PersistentIdentifier
-    let mode: TravelMode
+    var mode: TravelMode
     let startedAt: Date
     let movementStartedAt: Date
     var endedAt: Date
@@ -34,22 +34,27 @@ struct RouteActivitySegment: Identifiable {
     var coordinates: [CLLocationCoordinate2D]
     var distanceMeters: CLLocationDistance
 
-    static func group(sortedPoints: [RoutePoint], inferModes: Bool = false) -> [Self] {
+    static func group(
+        sortedPoints: [RoutePoint],
+        inferModes: Bool = false,
+        leadingStayPoint: RoutePoint? = nil,
+        trailingStayPoint: RoutePoint? = nil
+    ) -> [Self] {
         var segments: [RouteActivitySegment] = []
-        var previousPoint: RoutePoint?
+        var previousPoint = leadingStayPoint
         var previousMode: TravelMode?
         for point in sortedPoints {
-            let meters = previousPoint.map { point.coordinate.location.distance(from: $0.coordinate.location) } ?? 0
-            let noise = (point.accuracy + (previousPoint?.accuracy ?? 0)) * 0.35
-            let distance = meters >= noise ? meters : 0
+            let distance = previousPoint.map { measuredDistance(from: $0, to: point) } ?? 0
+            let startsDrawingSegment = point.startsNewSegment && (leadingStayPoint == nil || !segments.isEmpty)
             let mode: TravelMode
-            if inferModes, point.mode == .unknown, distance > 0, let previousPoint, !point.startsNewSegment {
+            if inferModes, point.mode == .unknown, distance > 0, let previousPoint, !startsDrawingSegment {
                 mode = TravelMode.estimated(metersPerSecond: distance / point.timestamp.timeIntervalSince(previousPoint.timestamp))
             } else {
                 mode = point.mode
             }
-            let bridgesPrevious = !point.startsNewSegment && mode != .stationary && previousMode != .stationary
-            if previousMode == mode, !point.startsNewSegment {
+            let bridgesPrevious = !startsDrawingSegment && mode != .stationary && previousMode != .stationary &&
+                (!segments.isEmpty || distance > 0)
+            if previousMode == mode, !startsDrawingSegment {
                 let index = segments.count - 1
                 segments[index].endedAt = point.timestamp
                 if mode != .stationary {
@@ -77,7 +82,25 @@ struct RouteActivitySegment: Identifiable {
             previousPoint = point
             previousMode = mode
         }
+        if let trailingStayPoint, let previousPoint, let last = segments.indices.last, segments[last].mode != .stationary {
+            let distance = measuredDistance(from: previousPoint, to: trailingStayPoint)
+            if distance > 0 {
+                if inferModes, segments[last].mode == .unknown {
+                    let seconds = trailingStayPoint.timestamp.timeIntervalSince(previousPoint.timestamp)
+                    segments[last].mode = TravelMode.estimated(metersPerSecond: distance / seconds)
+                }
+                segments[last].endedAt = trailingStayPoint.timestamp
+                segments[last].coordinates.append(trailingStayPoint.coordinate)
+                segments[last].distanceMeters += distance
+            }
+        }
         return segments
+    }
+
+    private static func measuredDistance(from first: RoutePoint, to second: RoutePoint) -> CLLocationDistance {
+        let meters = first.coordinate.location.distance(from: second.coordinate.location)
+        let noise = (first.accuracy + second.accuracy) * 0.35
+        return meters >= noise ? meters : 0
     }
 }
 
@@ -90,7 +113,7 @@ struct RouteReviewEntry: Identifiable {
     }
 
     var id: PersistentIdentifier { segments[0].id }
-    var startedAt: Date { stay?.startedAt ?? segments[0].startedAt }
+    var startedAt: Date { stay?.startedAt ?? segments[0].movementStartedAt }
     var endedAt: Date { stay?.endedAt ?? segments[segments.count - 1].endedAt }
 
     let kind: Kind
@@ -208,12 +231,21 @@ struct RouteReview {
                         visits.append(RouteVisit(id: first.persistentModelID, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
                     }
                     for (day, points) in pointsByDay {
-                        let segments = RouteActivitySegment.group(sortedPoints: points, inferModes: slice.visitCoordinate == nil)
+                        let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
+                        let previousSlice = day == firstDay && sliceIndex > 0 ? slices[sliceIndex - 1] : nil
+                        let nextSlice = day == lastDay && sliceIndex + 1 < slices.count ? slices[sliceIndex + 1] : nil
+                        let previousVisit = previousSlice?.visitCoordinate
+                        let nextVisit = nextSlice?.visitCoordinate
+                        let leading = slice.visitCoordinate == nil && previousVisit != nil ? previousSlice?.points.last : nil
+                        let trailing = slice.visitCoordinate == nil && nextVisit != nil ? nextSlice?.points.first : nil
+                        let segments = RouteActivitySegment.group(
+                            sortedPoints: points,
+                            inferModes: slice.visitCoordinate == nil,
+                            leadingStayPoint: leading.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil },
+                            trailingStayPoint: trailing.flatMap { calendar.isDate($0.timestamp, inSameDayAs: day) ? $0 : nil }
+                        )
                         let hasMovement = segments.contains { $0.distanceMeters > 0 }
                         let kind: RouteReviewEntry.Kind = slice.visitCoordinate != nil ? .visit : (hasMovement ? .trip : .fragment)
-                        let followsGap = index > 0 && slice.points.startIndex == run.startIndex && day == firstDay
-                        let previousVisit = day == firstDay && sliceIndex > 0 ? slices[sliceIndex - 1].visitCoordinate : nil
-                        let nextVisit = day == lastDay && sliceIndex + 1 < slices.count ? slices[sliceIndex + 1].visitCoordinate : nil
                         let endpoints = kind == .trip ? Self.endpoints(in: segments, previousVisit: previousVisit, nextVisit: nextVisit) : nil
                         let stay = slice.visitCoordinate.map { coordinate in
                             let dayEnd = calendar.dateInterval(of: .day, for: day)?.end ?? last.timestamp
@@ -286,7 +318,7 @@ struct RouteReview {
         var candidate = start
         while candidate < run.endIndex {
             let first = run[candidate]
-            guard first.mode == .stationary || first.mode == .unknown else {
+            guard isStayCandidate(first) else {
                 candidate += 1
                 continue
             }
@@ -294,8 +326,15 @@ struct RouteReview {
             var end = candidate + 1
             while end < run.endIndex {
                 let point = run[end]
-                guard (point.mode == .stationary || point.mode == .unknown),
-                      point.coordinate.location.distance(from: anchor) <= stayRadius else { break }
+                guard isStayCandidate(point) else { break }
+                let distance = point.coordinate.location.distance(from: anchor)
+                if distance > stayRadius {
+                    let next = end + 1
+                    guard distance <= stayRadius + point.accuracy, next < run.endIndex,
+                          isStayCandidate(run[next]),
+                          run[next].timestamp.timeIntervalSince(run[end - 1].timestamp) <= LocationSampling.maximumGap,
+                          run[next].coordinate.location.distance(from: anchor) <= stayRadius else { break }
+                }
                 end += 1
             }
             guard run[end - 1].timestamp.timeIntervalSince(first.timestamp) >= minimumVisitDuration else {
@@ -312,11 +351,16 @@ struct RouteReview {
         return slices
     }
 
+    private static func isStayCandidate(_ point: RoutePoint) -> Bool {
+        point.mode == .stationary || point.mode == .unknown
+    }
+
     private static func center(of points: ArraySlice<RoutePoint>, near anchor: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+        let anchorLocation = anchor.location
         var latitude = 0.0
         var longitudeOffset = 0.0
         var weight = 0.0
-        for point in points {
+        for point in points where point.coordinate.location.distance(from: anchorLocation) <= stayRadius {
             let confidence = 1 / max(point.accuracy, 5)
             let delta = (point.longitude - anchor.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
             latitude += point.latitude * confidence
@@ -337,7 +381,7 @@ struct RouteReview {
         nextVisit: CLLocationCoordinate2D?
     ) -> RouteReviewEntry.Endpoints? {
         let movement = segments.filter { $0.mode != .stationary }
-        guard let start = movement.first?.startCoordinate, let end = movement.last?.coordinates.last else { return nil }
+        guard let start = movement.first?.coordinates.first, let end = movement.last?.coordinates.last else { return nil }
         return RouteReviewEntry.Endpoints(start: place(near: start, visit: previousVisit), end: place(near: end, visit: nextVisit))
     }
 

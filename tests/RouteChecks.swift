@@ -114,8 +114,12 @@ struct RouteChecks {
         }
 
         for seconds in stride(from: 0, to: homeEnd, by: 30) {
-            let drift = Double((seconds / 30) % 5 - 2) * 0.0001
-            add(seconds, longitude: drift, mode: seconds % 60 == 0 ? .unknown : .stationary)
+            let drift = seconds == homeEnd - 30 ? 0 : Double((seconds / 30) % 5 - 2) * 0.0001
+            if seconds == 4 * 3_600 {
+                add(seconds, longitude: 0.00072, mode: .stationary, accuracy: 45)
+            } else {
+                add(seconds, longitude: drift, mode: seconds % 60 == 0 ? .unknown : .stationary)
+            }
         }
         add(301, longitude: 0.04, mode: .unknown, accuracy: 70)
         add(601, longitude: 0.04, mode: .unknown)
@@ -149,6 +153,16 @@ struct RouteChecks {
         let expected = location(longitude: 0, at: day).distance(from: location(longitude: 0.15, at: day))
         precondition(abs(walk.distanceMeters + drive.distanceMeters - expected) < 5)
         precondition(entries.last?.kind == .fragment && entries.last?.followsGap == true)
+
+        let shortTrip = insertRoute(context: context, start: day, samples: stop(start: 0, longitude: 0) + [
+            (510, 0.002, .automotive, true)
+        ] + stop(start: 540, longitude: 0.004))
+        let shortTimeline = RouteReview(routes: [shortTrip], calendar: calendar).days[0].timeline
+        guard shortTimeline.count == 3, case let .move(move) = shortTimeline[1] else {
+            preconditionFailure("A single moving sample should retain both observed edges.")
+        }
+        precondition(move.mode == .automotive && move.duration == 60 && move.distanceMeters > 440)
+        precondition(move.coordinates.first?.longitude == 0 && move.coordinates.last?.longitude == 0.004)
     }
 
     @MainActor
