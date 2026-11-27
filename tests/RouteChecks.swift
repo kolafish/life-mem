@@ -29,6 +29,11 @@ struct RouteChecks {
         precondition(walking.assess(farther, after: farther, mode: .walking) == nil)
         precondition(driving.assess(afterGap, after: first, mode: .automotive)?.startsNewSegment == true)
         precondition(driving.assess(afterGap, after: nil, mode: .automotive)?.distance == 0)
+        precondition(driving.assess(location(longitude: 0, at: start, accuracy: 51), after: nil, mode: .automotive) == nil)
+        let flyaway = location(longitude: 0.03, at: start.addingTimeInterval(5))
+        precondition(driving.assess(flyaway, after: first, mode: .automotive, previousMode: .stationary) == nil)
+        let heartbeat = LocationSampling(mode: .unknown).assess(stayEnd, after: stayStart, mode: .unknown)
+        precondition(heartbeat?.distance == 0 && heartbeat?.startsNewSegment == false)
 
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -81,8 +86,69 @@ struct RouteChecks {
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
         try checkReview(context: context)
+        try checkSemanticTimeline(context: context)
         try checkPlaceNames(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+    }
+
+    @MainActor
+    private static func checkSemanticTimeline(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 11, day: 25))!
+        let homeEnd = 8 * 3_600
+        let walkEnd = homeEnd + 600
+        let driveEnd = walkEnd + 1_200
+        let workStart = driveEnd + 30
+        let route = RecordedRoute(startedAt: day)
+        context.insert(route)
+
+        func add(_ seconds: Int, longitude: Double, mode: TravelMode, accuracy: Double = 5, boundary: Bool = false) {
+            context.insert(RoutePoint(
+                location: location(longitude: longitude, at: day.addingTimeInterval(Double(seconds)), accuracy: accuracy),
+                mode: mode,
+                startsNewSegment: boundary || seconds == homeEnd,
+                startsRecordingRun: boundary,
+                route: route
+            ))
+        }
+
+        for seconds in stride(from: 0, to: homeEnd, by: 30) {
+            let drift = Double((seconds / 30) % 5 - 2) * 0.0001
+            add(seconds, longitude: drift, mode: seconds % 60 == 0 ? .unknown : .stationary)
+        }
+        add(301, longitude: 0.04, mode: .unknown, accuracy: 70)
+        add(601, longitude: 0.04, mode: .unknown)
+        for seconds in stride(from: homeEnd, through: walkEnd, by: 30) {
+            add(seconds, longitude: Double(seconds - homeEnd) * 0.00001, mode: seconds == homeEnd ? .walking : .unknown)
+        }
+        for seconds in stride(from: walkEnd + 30, through: driveEnd, by: 30) {
+            add(seconds, longitude: 0.006 + Double(seconds - walkEnd) * 0.00012, mode: .automotive)
+        }
+        for seconds in stride(from: workStart, through: workStart + 4 * 3_600, by: 30) {
+            add(seconds, longitude: 0.15, mode: .stationary)
+        }
+        // Resuming in a different motion state still starts a new observation run.
+        add(workStart + 4 * 3_600 + 20, longitude: 0.151, mode: .walking, boundary: true)
+        try context.save()
+
+        let review = RouteReview(routes: [route], calendar: calendar)
+        let entries = review.days[0].entries
+        let events = review.days[0].timeline
+        guard events.count == 4,
+              case let .stay(home) = events[0],
+              case let .move(walk) = events[1],
+              case let .move(drive) = events[2],
+              case let .stay(work) = events[3] else {
+            preconditionFailure("Expected home, walk, drive, work.")
+        }
+        precondition(abs(home.coordinate.longitude) < 0.00001)
+        precondition(home.duration == Double(homeEnd - 30) && work.duration == 4 * 3_600)
+        precondition(walk.mode == .walking && walk.duration == 600)
+        precondition(drive.mode == .automotive && drive.duration == 1_200)
+        let expected = location(longitude: 0, at: day).distance(from: location(longitude: 0.15, at: day))
+        precondition(abs(walk.distanceMeters + drive.distanceMeters - expected) < 5)
+        precondition(entries.last?.kind == .fragment && entries.last?.followsGap == true)
     }
 
     @MainActor
@@ -108,14 +174,14 @@ struct RouteChecks {
                 (110, 0.0042, .automotive, true),
                 (130, 0.0099, .automotive, false)
             ] + stop(start: 150, longitude: destination) + [
-                (475, 0.0099, .walking, true),
-                (490, 0.0096, .walking, false),
-                (510, 0.0003, .automotive, false),
-                (525, 0.0, .walking, false),
-                (550, 0.03, .walking, true),
-                (565, 0.0302, .walking, false),
-                (700, 0.04, .walking, false),
-                (715, 0.0402, .walking, false)
+                (655, 0.0099, .walking, true),
+                (670, 0.0096, .walking, false),
+                (690, 0.0003, .automotive, false),
+                (705, 0.0, .walking, false),
+                (730, 0.03, .walking, true),
+                (745, 0.0302, .walking, false),
+                (880, 0.04, .walking, false),
+                (895, 0.0402, .walking, false)
             ]
         )
         let repeatedVisit = insertRoute(
@@ -137,8 +203,8 @@ struct RouteChecks {
         precondition(review.days.map(\.date) == [day, previousDay])
         let today = review.days[0].entries
         precondition(today.map(\.kind) == [.trip, .visit, .trip, .trip, .trip, .fragment])
-        precondition(today[0].segments.map(\.mode) == [.walking, .automotive, .unknown, .stationary, .automotive])
-        precondition(today[1].endedAt.timeIntervalSince(today[1].startedAt) == 300)
+        precondition(today[0].segments.map(\.mode) == [.walking, .automotive, .stationary, .automotive])
+        precondition(today[1].endedAt.timeIntervalSince(today[1].startedAt) == 480)
         precondition(today[0].endpoints?.start.longitude == 0)
         precondition(today[0].endpoints?.end.longitude == destination)
         precondition(today[1].visitCoordinate?.longitude == destination)
@@ -147,7 +213,7 @@ struct RouteChecks {
         precondition(today[3].endpoints?.start.longitude == 0.03)
         precondition(today[2].segments.last?.coordinates.last?.longitude == 0)
         precondition(today[0].segments.first?.coordinates.first?.longitude == 0)
-        precondition(today.filter(\.followsGap).map(\.startedAt) == [morning.addingTimeInterval(550), morning.addingTimeInterval(700)])
+        precondition(today.filter(\.followsGap).map(\.startedAt) == [morning.addingTimeInterval(730), morning.addingTimeInterval(880)])
         precondition(today[4].segments[0].coordinates.map(\.longitude) == [0.04, 0.0402])
         precondition(review.places.map { $0.visits.count } == [2])
         precondition(review.places[0].visits.map(\.date) == [previousDay, day])
@@ -182,7 +248,9 @@ struct RouteChecks {
         precondition(beforeMidnight[1].endpoints?.end.longitude == 0.0002)
         precondition(afterMidnight[1].endpoints?.start.longitude == 0.0004)
         precondition(afterMidnight[0].startedAt == nextDay)
-        precondition(beforeMidnight[0].endedAt < nextDay)
+        precondition(beforeMidnight[0].endedAt == nextDay)
+        precondition(afterMidnight[0].stay?.visitID == beforeMidnight[0].stay?.visitID)
+        precondition((afterMidnight[0].stay?.duration ?? 0) + (beforeMidnight[0].stay?.duration ?? 0) == 480)
         precondition(midnightReview.places[0].mostRecentVisit.id == beforeMidnight[0].id)
     }
 
@@ -223,7 +291,7 @@ struct RouteChecks {
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)
 
     private static func stop(start: TimeInterval, longitude: Double) -> [Sample] {
-        stride(from: 0, through: 300, by: 30).map {
+        stride(from: 0, through: 480, by: 30).map {
             (start + TimeInterval($0), longitude, .stationary, $0 == 0)
         }
     }
@@ -263,11 +331,11 @@ struct RouteChecks {
         }
     }
 
-    private static func location(longitude: Double, at timestamp: Date) -> CLLocation {
+    private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {
         CLLocation(
             coordinate: CLLocationCoordinate2D(latitude: 0, longitude: longitude),
             altitude: 0,
-            horizontalAccuracy: 5,
+            horizontalAccuracy: accuracy,
             verticalAccuracy: 10,
             timestamp: timestamp
         )

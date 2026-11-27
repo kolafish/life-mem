@@ -445,8 +445,8 @@ private struct ReviewMap: View {
     var body: some View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
             ForEach(entries) { entry in
-                if entry.kind == .visit {
-                    Marker(entry.visitCoordinate.flatMap { placeNames.name(for: $0) } ?? "停留", systemImage: "mappin", coordinate: entry.segments[0].startCoordinate)
+                if let coordinate = entry.visitCoordinate {
+                    Marker(placeNames.name(for: coordinate) ?? "停留", systemImage: "mappin", coordinate: coordinate)
                         .tint(.teal)
                 } else {
                     ForEach(entry.segments) { segment in

@@ -96,12 +96,18 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         let latestAllowed = Date().addingTimeInterval(5)
         for location in locations where location.timestamp >= recordingStartedAt && location.timestamp <= latestAllowed {
             guard CLLocationCoordinate2DIsValid(location.coordinate),
-                  (0...65).contains(location.horizontalAccuracy) else { continue }
+                  (0...LocationSampling.accuracyLimit).contains(location.horizontalAccuracy) else { continue }
             if let lastPoint, location.timestamp <= lastPoint.location.timestamp { continue }
             updateMode(from: location)
             let sampling = LocationSampling(mode: mode)
             guard let step = sampling.assess(location, after: lastPoint?.location, mode: mode, previousMode: lastPoint?.mode) else { continue }
-            let point = RoutePoint(location: location, mode: mode, startsNewSegment: step.startsNewSegment, route: route)
+            let point = RoutePoint(
+                location: location,
+                mode: mode,
+                startsNewSegment: step.startsNewSegment,
+                startsRecordingRun: lastPoint == nil,
+                route: route
+            )
             context.insert(point)
             route.pointCount += 1
             route.distanceMeters += step.distance
