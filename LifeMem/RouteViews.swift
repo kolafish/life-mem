@@ -93,20 +93,41 @@ struct RouteHistoryView: View {
         } else if review.places.isEmpty {
             ContentUnavailableView("暂无停留地点", systemImage: "mappin.circle", description: Text("记录到持续停留后，可以在这里回看历次到访。"))
         } else {
-            List(review.places) { place in
-                let name = placeResolver.label(near: place.coordinate, names: placeNames)
-                let visitCount = "\(place.visits.count) 次到访"
-                let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
-                NavigationLink {
-                    RoutePlaceReviewView(place: place, days: review.days)
-                } label: {
-                    Label {
-                        ReviewTextRow(
-                            title: name ?? visitCount,
-                            detail: name == nil ? lastVisit : "\(visitCount) · \(lastVisit)"
-                        )
-                    } icon: {
-                        Image(systemName: "mappin.circle.fill").foregroundStyle(.indigo)
+            let suggestions = PlaceSuggestions.candidates(in: review.places, calendar: calendar, category: placeNames.category(for:))
+            List {
+                if !suggestions.isEmpty {
+                    Section("常用地点建议") {
+                        ForEach(suggestions) { item in
+                            NavigationLink {
+                                RoutePlaceReviewView(place: item.place, days: review.days, suggestedCategory: item.category)
+                            } label: {
+                                Label {
+                                    ReviewTextRow(title: "建议设为\(item.category.title)", detail: "\(item.observedDays) 天有相符的停留")
+                                } icon: {
+                                    Image(systemName: item.category.symbol).foregroundStyle(.indigo)
+                                }
+                            }
+                            .accessibilityIdentifier("place-suggestion-\(item.category.rawValue)")
+                        }
+                    }
+                }
+                Section {
+                    ForEach(review.places) { place in
+                        let name = placeResolver.label(near: place.coordinate, names: placeNames)
+                        let visitCount = "\(place.visits.count) 次到访"
+                        let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
+                        NavigationLink {
+                            RoutePlaceReviewView(place: place, days: review.days)
+                        } label: {
+                            Label {
+                                ReviewTextRow(
+                                    title: name ?? visitCount,
+                                    detail: name == nil ? lastVisit : "\(visitCount) · \(lastVisit)"
+                                )
+                            } icon: {
+                                Image(systemName: "mappin.circle.fill").foregroundStyle(.indigo)
+                            }
+                        }
                     }
                 }
             }
@@ -172,6 +193,7 @@ struct RouteHistoryView: View {
 private struct RoutePlaceReviewView: View {
     let place: RoutePlace
     let days: [RouteReviewDay]
+    var suggestedCategory: PlaceCategory? = nil
 
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
@@ -192,6 +214,14 @@ private struct RoutePlaceReviewView: View {
                 .frame(height: 220)
                 .accessibilityLabel("停留地点地图")
                 .listRowInsets(EdgeInsets())
+                if let suggestedCategory, placeNames.category(for: place.coordinate) == nil {
+                    Button("设为\(suggestedCategory.title)") {
+                        namingTarget = PlaceNamingTarget(
+                            title: "确认地点分类", coordinate: place.coordinate, suggestedCategory: suggestedCategory
+                        )
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                }
                 Button(placeNames.name(for: place.coordinate) == nil ? "给地点命名" : "编辑地名") {
                     namingTarget = PlaceNamingTarget(title: "停留地点", coordinate: place.coordinate)
                 }
@@ -215,15 +245,15 @@ private struct RoutePlaceReviewView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(name ?? "停留地点")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: placeResolver.isAutomaticEnabled && namingTarget == nil) {
-            guard placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
+        .task(id: suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil) {
+            guard suggestedCategory == nil, placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
             await placeResolver.resolveAutomatically(near: place.coordinate, names: placeNames)
         }
         .sheet(item: $namingTarget) { target in
             PlaceNamingView(
                 target: target,
-                initialName: placeNames.name(for: target.coordinate),
-                category: placeNames.category(for: target.coordinate)
+                initialName: placeNames.name(for: target.coordinate) ?? target.suggestedCategory?.defaultName,
+                category: placeNames.category(for: target.coordinate) ?? target.suggestedCategory
             )
         }
     }

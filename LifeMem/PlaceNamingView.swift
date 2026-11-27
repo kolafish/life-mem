@@ -5,6 +5,7 @@ struct PlaceNamingTarget: Identifiable {
     let id = UUID()
     let title: String
     let coordinate: CLLocationCoordinate2D
+    var suggestedCategory: PlaceCategory? = nil
 }
 
 struct PlaceNamingView: View {

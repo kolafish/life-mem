@@ -136,6 +136,10 @@ private enum ReviewTestFixture {
 
     @MainActor
     static func seed(context: ModelContext, names: RoutePlaceNames) throws {
+        if scenario == "suggestions" {
+            try seedSuggestions(context: context)
+            return
+        }
         guard scenario == "day" else { return }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
@@ -179,6 +183,26 @@ private enum ReviewTestFixture {
         }
         try names.save("测试之家", category: .home, for: .init(latitude: 37.3317, longitude: -122.0307))
         try names.save("测试办公室", category: .work, for: .init(latitude: 37.3317, longitude: -122.0202))
+        try context.save()
+    }
+
+    private static func seedSuggestions(context: ModelContext) throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        for offset in 1...3 {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            let start = date.addingTimeInterval(2 * 3_600)
+            let route = RecordedRoute(startedAt: start)
+            route.isFinished = true
+            context.insert(route)
+            for seconds in stride(from: 0, through: 30 * 60, by: 60) {
+                let location = CLLocation(coordinate: .init(latitude: 37.3317, longitude: -122.0307),
+                                          altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5,
+                                          timestamp: start.addingTimeInterval(Double(seconds)))
+                context.insert(RoutePoint(location: location, mode: .stationary, startsNewSegment: seconds == 0, route: route))
+                route.pointCount += 1
+            }
+        }
         try context.save()
     }
 }
