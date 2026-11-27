@@ -95,7 +95,7 @@ struct LocationSampling {
             maximumAccuracy = 40
             maximumTravelSpeed = 30
         case .stationary:
-            desiredAccuracy = kCLLocationAccuracyHundredMeters
+            desiredAccuracy = kCLLocationAccuracyNearestTenMeters
             distanceFilter = kCLDistanceFilterNone
             maximumAccuracy = Self.accuracyLimit
             maximumTravelSpeed = Self.speedLimit
@@ -126,6 +126,50 @@ struct LocationSampling {
         if meters >= max(distanceFilter, noiseAllowance) { return .continuation(distance: meters) }
         if mode == .unknown, seconds >= 30 { return .continuation(distance: 0) }
         return nil
+    }
+}
+
+struct SpeedModeEstimate {
+    private var candidate: TravelMode?
+    private var firstObservation = Date.distantPast
+    private var lastObservation = Date.distantPast
+
+    mutating func observe(_ location: CLLocation, currentMode: TravelMode) -> TravelMode? {
+        guard location.speed.isFinite, location.speed >= 0,
+              (0...3).contains(location.speedAccuracy),
+              (0...35).contains(location.horizontalAccuracy) else {
+            candidate = nil
+            return nil
+        }
+
+        let next: TravelMode
+        let minimumDuration: TimeInterval
+        switch location.speed {
+        case 7.5...:
+            next = .automotive
+            minimumDuration = 0
+        case 0.7...2.8 where currentMode != .automotive:
+            next = .walking
+            minimumDuration = 0
+        case 2.8..<7.5 where currentMode != .automotive && location.speedAccuracy <= 1.5:
+            next = .cycling
+            minimumDuration = 8
+        case 0..<0.7 where location.speedAccuracy <= 1:
+            next = .stationary
+            minimumDuration = 12
+        default:
+            candidate = nil
+            return nil
+        }
+
+        let interval = location.timestamp.timeIntervalSince(lastObservation)
+        lastObservation = location.timestamp
+        guard candidate == next, interval > 0, interval <= 15 else {
+            candidate = next
+            firstObservation = location.timestamp
+            return nil
+        }
+        return location.timestamp.timeIntervalSince(firstObservation) >= minimumDuration ? next : nil
     }
 }
 
