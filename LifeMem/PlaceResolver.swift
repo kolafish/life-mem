@@ -40,6 +40,7 @@ final class PlaceResolver {
     private let defaults: UserDefaults
     private let lookup: (CLLocationCoordinate2D) async -> MapPlaceSuggestion?
     private var entries: [Entry]
+    private var cacheRevision = UUID()
     private(set) var isAutomaticEnabled: Bool
 
     init(
@@ -58,6 +59,12 @@ final class PlaceResolver {
     func setAutomaticEnabled(_ enabled: Bool) {
         isAutomaticEnabled = enabled
         defaults.set(enabled, forKey: Self.automaticPreference)
+    }
+
+    func clearCache() throws {
+        try Data("[]".utf8).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        entries = []
+        cacheRevision = UUID()
     }
 
     func cached(near coordinate: CLLocationCoordinate2D) -> MapPlaceSuggestion? {
@@ -80,8 +87,9 @@ final class PlaceResolver {
     func resolve(near coordinate: CLLocationCoordinate2D, automatic: Bool) async -> MapPlaceSuggestion? {
         guard !Task.isCancelled, !automatic || isAutomaticEnabled else { return nil }
         if let cached = cached(near: coordinate) { return cached }
+        let revision = cacheRevision
         guard let suggestion = await lookup(coordinate), suggestion.displayName != nil,
-              !Task.isCancelled, !automatic || isAutomaticEnabled else { return nil }
+              revision == cacheRevision, !Task.isCancelled, !automatic || isAutomaticEnabled else { return nil }
         if let cached = cached(near: coordinate) { return cached }
         entries.append(Entry(latitude: coordinate.latitude, longitude: coordinate.longitude, suggestion: suggestion))
         if let data = try? JSONEncoder().encode(entries) {

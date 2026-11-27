@@ -13,6 +13,8 @@ struct RouteHistoryView: View {
     @State private var review: RouteReview?
     @State private var showsArchive = false
     @State private var confirmsAutomaticLookup = false
+    @State private var confirmsCacheRemoval = false
+    @State private var cacheRemovalFailed = false
 
     private enum BrowseMode: String, CaseIterable {
         case timeline = "时间线"
@@ -43,22 +45,25 @@ struct RouteHistoryView: View {
         }
         .navigationTitle("回顾")
         .toolbar {
-            if !routes.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if !routes.isEmpty {
                         Button("管理记录", systemImage: "tray.full") { showsArchive = true }
-                        if placeResolver.isAutomaticEnabled {
-                            Button("关闭自动地名", systemImage: "mappin.slash") {
-                                placeResolver.setAutomaticEnabled(false)
-                            }
-                        } else {
-                            Button("开启自动地名", systemImage: "mappin.and.ellipse") {
-                                confirmsAutomaticLookup = true
-                            }
-                        }
-                    } label: {
-                        Label("回顾选项", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
                     }
+                    if placeResolver.isAutomaticEnabled {
+                        Button("关闭自动地名", systemImage: "mappin.slash") {
+                            placeResolver.setAutomaticEnabled(false)
+                        }
+                    } else {
+                        Button("开启自动地名", systemImage: "mappin.and.ellipse") {
+                            confirmsAutomaticLookup = true
+                        }
+                    }
+                    Button("清除地名建议缓存", systemImage: "trash", role: .destructive) {
+                        confirmsCacheRemoval = true
+                    }
+                } label: {
+                    Label("回顾选项", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
                 }
             }
         }
@@ -67,6 +72,23 @@ struct RouteHistoryView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("打开回顾时，系统地图会使用未命名停留的中心坐标查找附近地名。可以随时在回顾选项里关闭。")
+        }
+        .alert("清除地名建议缓存？", isPresented: $confirmsCacheRemoval) {
+            Button("清除", role: .destructive) {
+                do {
+                    try placeResolver.clearCache()
+                } catch {
+                    cacheRemovalFailed = true
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会删除缓存的地图建议及查询坐标。你保存的地名仍可使用。")
+        }
+        .alert("暂时无法清除缓存", isPresented: $cacheRemovalFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查设备的可用存储空间后重试。")
         }
         .sheet(isPresented: $showsArchive) {
             NavigationStack { RouteArchiveView() }

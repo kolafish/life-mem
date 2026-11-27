@@ -337,6 +337,10 @@ struct RouteChecks {
         let reopened = PlaceResolver(file: file, defaults: defaults) { _ in nil }
         precondition(!reopened.isAutomaticEnabled)
         precondition(reopened.cached(near: neighbor)?.candidates == ["市图书馆", "书院路附近"])
+        try reopened.clearCache()
+        let cleared = PlaceResolver(file: file, defaults: defaults) { _ in nil }
+        precondition(cleared.cached(near: neighbor) == nil)
+        precondition(cleared.label(near: neighbor, names: names) == "最喜欢的图书馆")
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)
