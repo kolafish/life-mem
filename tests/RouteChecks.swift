@@ -540,19 +540,23 @@ struct RouteChecks {
                                      samples: (0..<12).map { (Double($0 * 10), 0, .unknown, $0 == 0) })
         try context.save()
         let ids = pointRoute.points.map(\.persistentModelID)
-        var journeys: [RouteJourney] = []
-        let trips: [(Int, TimeInterval, TravelMode, Bool)] = [
-            (-20, 1_200, .automotive, false), (-7, 1_800, .automotive, false), (-6, 2_400, .automotive, false),
-            (0, 1_620, .automotive, false), (1, 1_380, .automotive, false), (2, 3_600, .automotive, true),
-            (1, 2_200, .cycling, false), (4, 9_000, .automotive, false)
-        ]
-        for (index, trip) in trips.enumerated() {
-            let (offset, duration, mode, reverse) = trip
-            let time = week.addingTimeInterval(Double(offset * 86_400 + 8 * 3_600))
-            let endpoints = RouteReviewEntry.Endpoints(start: reverse ? work : home, end: reverse ? home : work)
-            journeys.append(RouteJourney(id: ids[index], endpoints: endpoints, departedAt: time,
-                                         duration: duration, mode: mode, departureStay: nil, arrivalStay: nil))
+        func journey(_ index: Int, day: Int, seconds: TimeInterval, hour: Double = 8, mode: TravelMode = .automotive,
+                     reverse: Bool = false, hasArrival: Bool = true) -> RouteJourney {
+            let departure = week.addingTimeInterval(Double(day * 86_400) + hour * 3_600)
+            let origin = reverse ? work : home
+            let destination = reverse ? home : work
+            let arrival = RouteJourney.StayConnection(coordinate: destination, time: departure.addingTimeInterval(seconds))
+            return RouteJourney(id: ids[index], endpoints: .init(start: origin, end: destination), departedAt: departure,
+                                duration: seconds, mode: mode,
+                                departureStay: .init(coordinate: origin, time: departure), arrivalStay: hasArrival ? arrival : nil)
         }
+        let journeys = [
+            journey(0, day: -20, seconds: 1_200), journey(1, day: -7, seconds: 1_800), journey(2, day: -6, seconds: 2_400),
+            journey(3, day: 0, seconds: 1_620, hour: 23.75), journey(4, day: 1, seconds: 1_380),
+            journey(5, day: 2, seconds: 3_600, reverse: true), journey(6, day: 1, seconds: 2_200, mode: .cycling),
+            journey(7, day: 4, seconds: 9_000), journey(8, day: 2, seconds: 60, hasArrival: false),
+            journey(9, day: 2, seconds: 70_000)
+        ]
 
         let stay = insertRoute(context: context, start: week, samples: stop(start: 0, longitude: 0))
         try context.save()
@@ -565,8 +569,8 @@ struct RouteChecks {
         try context.save()
         let prior = RouteReview(routes: [priorStay], calendar: calendar)
         let priorHome = prior.places[0].visits[0]
-        let firstVisit = RouteVisit(id: ids[9], date: week, startedAt: week, endedAt: week.addingTimeInterval(480), coordinate: newPlace)
-        let futureVisit = RouteVisit(id: ids[10], date: upper, startedAt: upper, endedAt: upper.addingTimeInterval(480),
+        let firstVisit = RouteVisit(id: ids[10], date: week, startedAt: week, endedAt: week.addingTimeInterval(480), coordinate: newPlace)
+        let futureVisit = RouteVisit(id: ids[11], date: upper, startedAt: upper, endedAt: upper.addingTimeInterval(480),
                                      coordinate: .init(latitude: 0, longitude: 0.04))
         let record = RouteSummaryRecord(days: (stays.days + prior.days).map(DailySummary.init(day:)),
                                         visits: [knownHome, priorHome, firstVisit, futureVisit], journeys: journeys)
@@ -576,9 +580,10 @@ struct RouteChecks {
             return coordinate.longitude == 0.02 ? .work : nil
         }
         let range = week...upper
-        let patterns = RouteBehavior.routePatterns(in: journeys, calendar: calendar)
+        let patterns = RouteInsights.routePatterns(in: journeys, calendar: calendar)
         let analytics = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: category)
-        let insights = RouteInsights(summary: summary, analytics: analytics, range: range, calendar: calendar, now: now, patterns: patterns, category: category)
+        let insights = RouteInsights(summary: summary, analytics: analytics, range: range, calendar: calendar, now: now,
+                                     patterns: patterns, hasHome: true, category: category)
         precondition(insights.newPlaceCount == 1 && insights.home?.share == 1)
         precondition(insights.home?.previousShare == 480.0 / 540.0)
         precondition(insights.home?.trackedDuration == 480 && insights.home?.elapsedDuration == 3 * 86_400)
@@ -587,9 +592,11 @@ struct RouteChecks {
         precondition(insights.commute?.fastestSample.duration == 1_380)
         precondition(insights.routes.count == 1 && insights.routes[0].fastest == 1_200 && insights.routes[0].slowest == 2_400)
 
-        let sparse = RouteInsights(summary: summary, analytics: analytics, range: week...week,
-                                   calendar: calendar, now: now, patterns: patterns, category: category)
-        precondition(sparse.commute == nil && sparse.routes.isEmpty)
+        let singleDay = week...week
+        let singleDayAnalytics = RouteAnalytics(summary: summary, range: singleDay, calendar: calendar, now: now, category: category)
+        let sparse = RouteInsights(summary: summary, analytics: singleDayAnalytics, range: singleDay,
+                                   calendar: calendar, now: now, patterns: patterns, hasHome: false, category: category)
+        precondition(sparse.commute == nil && sparse.routes.isEmpty && sparse.home == nil)
     }
 
     @MainActor

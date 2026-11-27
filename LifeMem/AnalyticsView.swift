@@ -17,6 +17,12 @@ struct AnalyticsView: View {
     @State private var end = Date.now
     @State private var rank = RouteAnalytics.PlaceRanking.visits
     @State private var selectedPattern: PersistentIdentifier?
+    @State private var routeHistory: RouteHistory?
+
+    private struct RouteHistory {
+        let summaryID: UUID
+        let patterns: [RouteBehavior.RoutePattern]
+    }
 
     private enum Period: String, CaseIterable, Identifiable {
         case week = "本周"
@@ -36,7 +42,6 @@ struct AnalyticsView: View {
 
     var body: some View {
         let range = dateRange(at: now)
-        let patterns = summary.map { RouteBehavior.routePatterns(in: $0.journeys, calendar: calendar) } ?? []
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 periodSelector
@@ -52,9 +57,12 @@ struct AnalyticsView: View {
                         timeAllocation(data, range: range)
                         if !data.places.isEmpty { topPlaces(data) }
                         if data.trackedDuration > 0 {
+                            let patterns = routeHistory?.summaryID == summary.id ? routeHistory?.patterns ?? [] : []
                             RouteInsightCards(
-                                insights: RouteInsights(summary: summary, analytics: data, range: range,
-                                                         calendar: calendar, now: now, patterns: patterns, category: names.category(for:)),
+                                insights: RouteInsights(
+                                    summary: summary, analytics: data, range: range, calendar: calendar, now: now,
+                                    patterns: patterns, hasHome: names.hasCategory(.home), category: names.category(for:)
+                                ),
                                 title: { patternTitle($0, index: $1) }
                             )
                             behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
@@ -70,6 +78,21 @@ struct AnalyticsView: View {
         .navigationTitle("分析")
         .onAppear { now = .now }
         .onReceive(refreshTimer) { now = $0 }
+        .task(id: summary?.id) {
+            guard let summary, routeHistory?.summaryID != summary.id else { return }
+            let journeys = summary.journeys
+            let calendar = calendar
+            let grouping = Task.detached(priority: .userInitiated) {
+                RouteInsights.routePatterns(in: journeys, calendar: calendar)
+            }
+            let patterns = await withTaskCancellationHandler {
+                await grouping.value
+            } onCancel: {
+                grouping.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            routeHistory = RouteHistory(summaryID: summary.id, patterns: patterns)
+        }
     }
 
     private func dateRange(at now: Date) -> ClosedRange<Date> {

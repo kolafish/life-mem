@@ -35,7 +35,8 @@ struct RouteInsights {
 
     init(
         summary: RouteSummary, analytics: RouteAnalytics, range: ClosedRange<Date>, calendar: Calendar,
-        now: Date = .now, patterns: [RouteBehavior.RoutePattern], category: (CLLocationCoordinate2D) -> PlaceCategory?
+        now: Date = .now, patterns: [RouteBehavior.RoutePattern], hasHome: Bool,
+        category: (CLLocationCoordinate2D) -> PlaceCategory?
     ) {
         let start = calendar.startOfDay(for: range.lowerBound)
         let fullEnd = calendar.dateInterval(of: .day, for: range.upperBound)?.end ?? range.upperBound
@@ -56,12 +57,14 @@ struct RouteInsights {
             }
         }
         let compared = patterns.compactMap { pattern -> (RouteBehavior.RoutePattern, [RouteBehavior.TravelSample])? in
-            let samples = Self.samples(pattern.samples, in: current)
+            let samples = Self.completedSamples(pattern.samples, departingIn: current, asOf: now)
             return samples.count >= 2 ? (pattern, samples) : nil
         }.sorted { $0.1.count > $1.1.count }
 
         routes = compared.prefix(5).compactMap { pattern, samples in
-            let history = pattern.samples.filter { $0.departedAt < now }.map(\.duration)
+            let history = pattern.samples.compactMap { sample in
+                sample.arrivedAt.map { $0 <= now } == true ? sample.duration : nil
+            }
             guard let fastest = history.min(), let slowest = history.max() else { return nil }
             return FrequentRoute(pattern: pattern, count: samples.count, average: Self.average(samples),
                                  fastest: fastest, slowest: slowest)
@@ -72,7 +75,7 @@ struct RouteInsights {
                 let origin = category(pattern.start)
                 let destination = category(pattern.end)
                 guard (origin == .home && destination == .work) || (origin == .work && destination == .home) else { return nil }
-                let earlier = Self.samples(pattern.samples, in: interval)
+                let earlier = Self.completedSamples(pattern.samples, departingIn: interval, asOf: now)
                 guard earlier.count >= 2, let fastest = samples.min(by: { $0.duration < $1.duration }) else { return nil }
                 return CommuteChange(pattern: pattern, average: Self.average(samples), previousAverage: Self.average(earlier),
                                      sampleCount: samples.count, previousSampleCount: earlier.count, fastestSample: fastest)
@@ -84,8 +87,7 @@ struct RouteInsights {
             return visit.startedAt >= current.start && visit.startedAt < current.end
         }.count
 
-        let homeKnown = summary.places.contains { category($0.coordinate) == .home }
-        if homeKnown, let share = Self.recordedHomeShare(analytics) {
+        if hasHome, let share = Self.recordedHomeShare(analytics) {
             let prior = calendar.date(byAdding: .day, value: -30, to: start).flatMap { priorStart in
                 calendar.date(byAdding: .day, value: -1, to: start).flatMap { priorEnd in
                     Self.recordedHomeShare(RouteAnalytics(
@@ -100,8 +102,18 @@ struct RouteInsights {
         }
     }
 
-    private static func samples(_ samples: [RouteBehavior.TravelSample], in interval: DateInterval) -> [RouteBehavior.TravelSample] {
-        samples.filter { $0.departedAt >= interval.start && $0.departedAt < interval.end }
+    static func routePatterns(in journeys: [RouteJourney], calendar: Calendar) -> [RouteBehavior.RoutePattern] {
+        let complete = journeys.filter { $0.departureStay != nil && $0.arrivalStay != nil }
+        return RouteBehavior.routePatterns(in: complete, calendar: calendar)
+    }
+
+    private static func completedSamples(
+        _ samples: [RouteBehavior.TravelSample], departingIn interval: DateInterval, asOf now: Date
+    ) -> [RouteBehavior.TravelSample] {
+        samples.filter { sample in
+            guard let arrivedAt = sample.arrivedAt else { return false }
+            return sample.departedAt >= interval.start && sample.departedAt < interval.end && arrivedAt <= now
+        }
     }
 
     private static func average(_ samples: [RouteBehavior.TravelSample]) -> TimeInterval {

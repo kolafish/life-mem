@@ -14,7 +14,7 @@ struct RouteInsightCards: View {
                     Text("本期 \(commute.sampleCount) 次，前一对应时段 \(commute.previousSampleCount) 次")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    let departure = commute.fastestSample.departedAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+                    let departure = commute.fastestSample.departedAt.formatted(.dateTime.month().day().weekday(.abbreviated).hour().minute())
                     Text("本期最快的一次于 \(departure) 出发，耗时 \(routeDuration(commute.fastestSample.duration))。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

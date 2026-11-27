@@ -71,6 +71,11 @@ final class ReviewUITests: XCTestCase {
         let insights = app.staticTexts["本期洞察"]
         scrollTo(insights, in: app)
         XCTAssertTrue(insights.isHittable)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "首次记录到")).firstMatch.exists)
+        let frequentRoutes = app.staticTexts["常走路线"]
+        XCTAssertTrue(frequentRoutes.waitForExistence(timeout: 8), app.debugDescription)
+        scrollTo(frequentRoutes, in: app)
+        XCTAssertTrue(frequentRoutes.isHittable)
 
         let travel = app.staticTexts["通行效率"]
         scrollTo(travel, in: app)
@@ -103,7 +108,8 @@ final class ReviewUITests: XCTestCase {
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.73))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.49))
-        for _ in 0..<12 where !element.isHittable {
+        for _ in 0..<12 {
+            if element.isHittable { return }
             start.press(forDuration: 0.15, thenDragTo: end)
         }
     }
