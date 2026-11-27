@@ -37,7 +37,9 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 ## 分析
 
-「分析」支持本周、本月和自定义日期。「时间分配与记录覆盖」区分观测到的移动、停留和未记录。过去日期按当地自然日结算，今天只统计到当前时刻，未来日期不入图。回顾与分析复用已解析的路线。分析可以从本机每日摘要直接打开，追加、删除或时区变化后会按当前数据刷新。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按首次观测到移动的日期和小时归类，展示整趟行程的耗时范围和中位数。「离家与回家」使用和标记为家的停留相连的记录，展示每日首次离家与末次回家。
+「分析」支持本周、本月和自定义日期。「时间分配与记录覆盖」区分观测到的移动、停留和未记录。过去日期按当地自然日结算，今天只统计到当前时刻，未来日期不入图。回顾与分析复用已解析的路线。分析可以从本机每日摘要直接打开，追加、删除或时区变化后会按当前数据刷新。跨午夜的连续移动和停留按午夜分摊，停留在所选范围内算一次到访。「常去地点」可按到访次数或累计停留时长切换排行，最多显示十处。「通行效率」按方向和主要出行方式归纳相近起终点的重复路线，按首次观测到移动的日期和小时归类，展示整趟行程的耗时范围和中位数。「本期洞察」显示首次记录的地点数、居家占已记录时长比例，以及有足够同路线样本时的通勤对比。「常走路线」同时列出本期平均和历史最短、最长耗时。
+
+通勤对比和常走路线使用出发、到达两端均有识别停留的完整行程，并按出发时间归类。「离家与回家」使用和标记为家的停留相连的记录，展示每日首次离家与末次回家。
 
 ## 本地检查
 
@@ -50,7 +52,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 ```sh
 mkdir -p DerivedData
 xcrun swiftc -parse-as-library \
-  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior}.swift \
+  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior,RouteInsights}.swift \
   tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```

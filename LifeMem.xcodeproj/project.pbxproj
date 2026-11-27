@@ -30,6 +30,8 @@
 		AA0000000000000000000415 /* RouteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000315 /* RouteStore.swift */; };
 		AA0000000000000000000420 /* RouteSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000320 /* RouteSummary.swift */; };
 		AA0000000000000000000430 /* PlaceSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000330 /* PlaceSuggestions.swift */; };
+		AA0000000000000000000440 /* RouteInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000340 /* RouteInsights.swift */; };
+		AA0000000000000000000441 /* RouteInsightCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000341 /* RouteInsightCards.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +72,8 @@
 		AA0000000000000000000315 /* RouteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteStore.swift; sourceTree = "<group>"; };
 		AA0000000000000000000320 /* RouteSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSummary.swift; sourceTree = "<group>"; };
 		AA0000000000000000000330 /* PlaceSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSuggestions.swift; sourceTree = "<group>"; };
+		AA0000000000000000000340 /* RouteInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteInsights.swift; sourceTree = "<group>"; };
+		AA0000000000000000000341 /* RouteInsightCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteInsightCards.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -90,6 +94,8 @@
 				AA0000000000000000000003 /* RouteRecorder.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000341 /* RouteInsightCards.swift */,
+				AA0000000000000000000340 /* RouteInsights.swift */,
 				AA0000000000000000000330 /* PlaceSuggestions.swift */,
 				AA0000000000000000000320 /* RouteSummary.swift */,
 				AA0000000000000000000315 /* RouteStore.swift */,
@@ -179,6 +185,8 @@
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+				AA0000000000000000000441 /* RouteInsightCards.swift in Sources */,
+				AA0000000000000000000440 /* RouteInsights.swift in Sources */,
 				AA0000000000000000000430 /* PlaceSuggestions.swift in Sources */,
 				AA0000000000000000000420 /* RouteSummary.swift in Sources */,
 				AA0000000000000000000415 /* RouteStore.swift in Sources */,

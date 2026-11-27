@@ -11,11 +11,18 @@ struct AnalyticsView: View {
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var now = Date.now
+    @State private var refreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
     @State private var rank = RouteAnalytics.PlaceRanking.visits
     @State private var selectedPattern: PersistentIdentifier?
+    @State private var routeHistory: RouteHistory?
+
+    private struct RouteHistory {
+        let summaryID: UUID
+        let patterns: [RouteBehavior.RoutePattern]
+    }
 
     private enum Period: String, CaseIterable, Identifiable {
         case week = "本周"
@@ -50,6 +57,14 @@ struct AnalyticsView: View {
                         timeAllocation(data, range: range)
                         if !data.places.isEmpty { topPlaces(data) }
                         if data.trackedDuration > 0 {
+                            let patterns = routeHistory?.summaryID == summary.id ? routeHistory?.patterns ?? [] : []
+                            RouteInsightCards(
+                                insights: RouteInsights(
+                                    summary: summary, analytics: data, range: range, calendar: calendar, now: now,
+                                    patterns: patterns, hasHome: names.hasCategory(.home), category: names.category(for:)
+                                ),
+                                title: { patternTitle($0, index: $1) }
+                            )
                             behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
                         }
                     }
@@ -62,7 +77,22 @@ struct AnalyticsView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
         .onAppear { now = .now }
-        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
+        .onReceive(refreshTimer) { now = $0 }
+        .task(id: summary?.id) {
+            guard let summary, routeHistory?.summaryID != summary.id else { return }
+            let journeys = summary.journeys
+            let calendar = calendar
+            let grouping = Task.detached(priority: .userInitiated) {
+                RouteInsights.routePatterns(in: journeys, calendar: calendar)
+            }
+            let patterns = await withTaskCancellationHandler {
+                await grouping.value
+            } onCancel: {
+                grouping.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            routeHistory = RouteHistory(summaryID: summary.id, patterns: patterns)
+        }
     }
 
     private func dateRange(at now: Date) -> ClosedRange<Date> {
@@ -288,7 +318,7 @@ struct AnalyticsView: View {
     }
 }
 
-private func analyticsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+func analyticsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 12) {
         Text(title).font(.headline).accessibilityAddTraits(.isHeader)
         content()

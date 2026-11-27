@@ -24,7 +24,9 @@ struct RouteBehavior {
         var id: ID { ID(day: day, kind: kind) }
     }
 
-    struct TravelSample {
+    struct TravelSample: Sendable {
+        let departedAt: Date
+        let arrivedAt: Date?
         let startingHour: Int
         let duration: TimeInterval
     }
@@ -39,7 +41,7 @@ struct RouteBehavior {
         var id: Int { hour }
     }
 
-    struct RoutePattern: Identifiable {
+    struct RoutePattern: Identifiable, Sendable {
         let id: PersistentIdentifier
         let start: CLLocationCoordinate2D
         let end: CLLocationCoordinate2D
@@ -70,7 +72,6 @@ struct RouteBehavior {
     }
 
     init(summary: RouteSummary, range: ClosedRange<Date>, calendar: Calendar, category: (CLLocationCoordinate2D) -> PlaceCategory?) {
-        var trips: [RoutePattern] = []
         var homeTimes: [RoutinePoint.ID: Date] = [:]
         for journey in summary.journeys.sorted(by: { $0.departedAt < $1.departedAt }) {
             for (kind, connection) in [(RoutineKind.departure, journey.departureStay), (.arrival, journey.arrivalStay)] {
@@ -82,12 +83,26 @@ struct RouteBehavior {
                 homeTimes[key] = kind == .departure ? min(previous, connection.time) : max(previous, connection.time)
             }
 
-            let departureDay = calendar.startOfDay(for: journey.departedAt)
-            guard range.contains(departureDay) else { continue }
+        }
+        patterns = Self.routePatterns(
+            in: summary.journeys.filter { range.contains(calendar.startOfDay(for: $0.departedAt)) },
+            calendar: calendar
+        )
+        routine = homeTimes.map { key, time in
+            let hour = Double(calendar.component(.hour, from: time)) + Double(calendar.component(.minute, from: time)) / 60
+            return RoutinePoint(day: key.day, kind: key.kind, time: time, clockHour: hour)
+        }.sorted { $0.time < $1.time }
+    }
+
+    static func routePatterns(in journeys: [RouteJourney], calendar: Calendar) -> [RoutePattern] {
+        var trips: [RoutePattern] = []
+        for journey in journeys.sorted(by: { $0.departedAt < $1.departedAt }) {
+            guard !Task.isCancelled else { return [] }
             let startLocation = Self.location(journey.endpoints.start)
             let endLocation = Self.location(journey.endpoints.end)
             guard startLocation.distance(from: endLocation) > RouteReview.placeRadius else { continue }
-            let sample = TravelSample(startingHour: calendar.component(.hour, from: journey.departedAt), duration: journey.duration)
+            let sample = TravelSample(departedAt: journey.departedAt, arrivedAt: journey.arrivalStay?.time,
+                                      startingHour: calendar.component(.hour, from: journey.departedAt), duration: journey.duration)
             let nearest = trips.indices.lazy.compactMap { index -> (index: Int, distance: CLLocationDistance)? in
                 guard trips[index].mode == journey.mode else { return nil }
                 let a = startLocation.distance(from: Self.location(trips[index].start))
@@ -104,13 +119,7 @@ struct RouteBehavior {
                 ))
             }
         }
-        patterns = trips.filter { $0.samples.count > 1 }.sorted {
-            $0.samples.count > $1.samples.count
-        }
-        routine = homeTimes.map { key, time in
-            let hour = Double(calendar.component(.hour, from: time)) + Double(calendar.component(.minute, from: time)) / 60
-            return RoutinePoint(day: key.day, kind: key.kind, time: time, clockHour: hour)
-        }.sorted { $0.time < $1.time }
+        return trips.filter { $0.samples.count > 1 }.sorted { $0.samples.count > $1.samples.count }
     }
 
     private static func location(_ coordinate: CLLocationCoordinate2D) -> CLLocation {

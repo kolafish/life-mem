@@ -66,14 +66,22 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(endDate.exists)
         app.buttons["本月"].tap()
         let ranking = app.staticTexts["常去地点"]
-        for _ in 0..<4 where !ranking.isHittable { app.swipeUp() }
+        scrollTo(ranking, in: app)
         XCTAssertTrue(ranking.isHittable)
+        let insights = app.staticTexts["本期洞察"]
+        scrollTo(insights, in: app)
+        XCTAssertTrue(insights.isHittable)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "首次记录到")).firstMatch.exists)
+        let frequentRoutes = app.staticTexts["常走路线"]
+        XCTAssertTrue(frequentRoutes.waitForExistence(timeout: 8), app.debugDescription)
+        scrollTo(frequentRoutes, in: app)
+        XCTAssertTrue(frequentRoutes.isHittable)
 
         let travel = app.staticTexts["通行效率"]
-        for _ in 0..<4 where !travel.isHittable { app.swipeUp() }
+        scrollTo(travel, in: app)
         XCTAssertTrue(travel.isHittable)
         let routine = app.staticTexts["离家与回家"]
-        for _ in 0..<4 where !routine.isHittable { app.swipeUp() }
+        scrollTo(routine, in: app)
         XCTAssertTrue(routine.isHittable)
     }
 
@@ -95,6 +103,15 @@ final class ReviewUITests: XCTestCase {
         app.buttons["保存"].tap()
         XCTAssertTrue(app.buttons["编辑地名"].waitForExistence(timeout: 5))
         XCTAssertFalse(confirm.exists)
+    }
+
+    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.73))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.49))
+        for _ in 0..<12 {
+            if element.isHittable { return }
+            start.press(forDuration: 0.15, thenDragTo: end)
+        }
     }
 
     private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {

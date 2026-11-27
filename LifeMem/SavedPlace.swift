@@ -70,6 +70,10 @@ final class RoutePlaceNames {
         matchingIndex(for: coordinate).flatMap { names[$0].category }
     }
 
+    func hasCategory(_ category: PlaceCategory) -> Bool {
+        names.contains { $0.category == category }
+    }
+
     func save(_ name: String?, category: PlaceCategory? = nil, for coordinate: CLLocationCoordinate2D) throws {
         if let loadError { throw loadError }
         var updated = names

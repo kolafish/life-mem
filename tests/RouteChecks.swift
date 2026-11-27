@@ -91,6 +91,7 @@ struct RouteChecks {
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
+        try checkInsights(context: context)
         try checkPlaceSuggestions(context: context)
         try checkPlaceNames(in: root)
         try await checkSummaryIndex(context: context, directory: root)
@@ -523,6 +524,79 @@ struct RouteChecks {
         }
         precondition(Set(overnightRoutine.routine.map(\.kind)) == [.departure, .arrival])
         precondition(overnightRoutine.routine.allSatisfy { $0.day == midnight && $0.time == midnight.addingTimeInterval(10) })
+    }
+
+    @MainActor
+    private static func checkInsights(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let week = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
+        let upper = calendar.date(byAdding: .day, value: 6, to: week)!
+        let now = week.addingTimeInterval(3 * 86_400)
+        let home = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let work = CLLocationCoordinate2D(latitude: 0, longitude: 0.02)
+        let newPlace = CLLocationCoordinate2D(latitude: 0, longitude: 0.03)
+        let pointRoute = insertRoute(context: context, start: week,
+                                     samples: (0..<12).map { (Double($0 * 10), 0, .unknown, $0 == 0) })
+        try context.save()
+        let ids = pointRoute.points.map(\.persistentModelID)
+        func journey(_ index: Int, day: Int, seconds: TimeInterval, hour: Double = 8, mode: TravelMode = .automotive,
+                     reverse: Bool = false, hasArrival: Bool = true) -> RouteJourney {
+            let departure = week.addingTimeInterval(Double(day * 86_400) + hour * 3_600)
+            let origin = reverse ? work : home
+            let destination = reverse ? home : work
+            let arrival = RouteJourney.StayConnection(coordinate: destination, time: departure.addingTimeInterval(seconds))
+            return RouteJourney(id: ids[index], endpoints: .init(start: origin, end: destination), departedAt: departure,
+                                duration: seconds, mode: mode,
+                                departureStay: .init(coordinate: origin, time: departure), arrivalStay: hasArrival ? arrival : nil)
+        }
+        let journeys = [
+            journey(0, day: -20, seconds: 1_200), journey(1, day: -7, seconds: 1_800), journey(2, day: -6, seconds: 2_400),
+            journey(3, day: 0, seconds: 1_620, hour: 23.75), journey(4, day: 1, seconds: 1_380),
+            journey(5, day: 2, seconds: 3_600, reverse: true), journey(6, day: 1, seconds: 2_200, mode: .cycling),
+            journey(7, day: 4, seconds: 9_000), journey(8, day: 2, seconds: 60, hasArrival: false),
+            journey(9, day: 2, seconds: 70_000)
+        ]
+
+        let stay = insertRoute(context: context, start: week, samples: stop(start: 0, longitude: 0))
+        try context.save()
+        let stays = RouteReview(routes: [stay], calendar: calendar)
+        let knownHome = stays.places[0].visits[0]
+        let priorStay = insertRoute(context: context, start: week.addingTimeInterval(-86_400),
+                                    samples: stop(start: 0, longitude: 0) + [
+                                        (510, 0.0003, .walking, true), (540, 0.0006, .walking, false)
+                                    ])
+        try context.save()
+        let prior = RouteReview(routes: [priorStay], calendar: calendar)
+        let priorHome = prior.places[0].visits[0]
+        let firstVisit = RouteVisit(id: ids[10], date: week, startedAt: week, endedAt: week.addingTimeInterval(480), coordinate: newPlace)
+        let futureVisit = RouteVisit(id: ids[11], date: upper, startedAt: upper, endedAt: upper.addingTimeInterval(480),
+                                     coordinate: .init(latitude: 0, longitude: 0.04))
+        let record = RouteSummaryRecord(days: (stays.days + prior.days).map(DailySummary.init(day:)),
+                                        visits: [knownHome, priorHome, firstVisit, futureVisit], journeys: journeys)
+        let summary = RouteSummary(records: [record])
+        func category(_ coordinate: CLLocationCoordinate2D) -> PlaceCategory? {
+            if coordinate.longitude == 0 { return .home }
+            return coordinate.longitude == 0.02 ? .work : nil
+        }
+        let range = week...upper
+        let patterns = RouteInsights.routePatterns(in: journeys, calendar: calendar)
+        let analytics = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: category)
+        let insights = RouteInsights(summary: summary, analytics: analytics, range: range, calendar: calendar, now: now,
+                                     patterns: patterns, hasHome: true, category: category)
+        precondition(insights.newPlaceCount == 1 && insights.home?.share == 1)
+        precondition(insights.home?.previousShare == 480.0 / 540.0)
+        precondition(insights.home?.trackedDuration == 480 && insights.home?.elapsedDuration == 3 * 86_400)
+        precondition(insights.commute?.sampleCount == 2 && insights.commute?.previousSampleCount == 2)
+        precondition(insights.commute?.average == 1_500 && insights.commute?.previousAverage == 2_100)
+        precondition(insights.commute?.fastestSample.duration == 1_380)
+        precondition(insights.routes.count == 1 && insights.routes[0].fastest == 1_200 && insights.routes[0].slowest == 2_400)
+
+        let singleDay = week...week
+        let singleDayAnalytics = RouteAnalytics(summary: summary, range: singleDay, calendar: calendar, now: now, category: category)
+        let sparse = RouteInsights(summary: summary, analytics: singleDayAnalytics, range: singleDay,
+                                   calendar: calendar, now: now, patterns: patterns, hasHome: false, category: category)
+        precondition(sparse.commute == nil && sparse.routes.isEmpty && sparse.home == nil)
     }
 
     @MainActor
