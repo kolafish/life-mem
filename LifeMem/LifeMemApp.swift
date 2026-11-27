@@ -8,7 +8,7 @@ struct LifeMemApp: App {
     private static let storageDirectory: URL = {
         #if DEBUG && targetEnvironment(simulator)
         if ReviewTestFixture.scenario != nil {
-            return URL.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            return URL.temporaryDirectory.appending(path: ReviewTestFixture.storageID.uuidString, directoryHint: .isDirectory)
         }
         #endif
         return URL.applicationSupportDirectory.appending(path: "LifeMem", directoryHint: .isDirectory)
@@ -33,9 +33,12 @@ struct LifeMemApp: App {
             defaults: preferences
         ))
         storage = Result {
+            #if DEBUG && targetEnvironment(simulator)
+            let shouldSeed = ReviewTestFixture.scenario != nil && !FileManager.default.fileExists(atPath: Self.storageDirectory.path)
+            #endif
             let container = try RouteStore.open(directory: Self.storageDirectory)
             #if DEBUG && targetEnvironment(simulator)
-            try ReviewTestFixture.seed(context: container.mainContext, names: names)
+            if shouldSeed { try ReviewTestFixture.seed(context: container.mainContext, names: names) }
             #endif
             return container
         }
@@ -81,8 +84,9 @@ private struct RootView: View {
     @State private var index: RouteSummaryIndex
 
     init(context: ModelContext, summaryFile: URL) {
-        _index = State(initialValue: RouteSummaryIndex(file: summaryFile))
-        _recorder = State(initialValue: RouteRecorder(context: context))
+        let index = RouteSummaryIndex(file: summaryFile)
+        _index = State(initialValue: index)
+        _recorder = State(initialValue: RouteRecorder(context: context, summaryIndex: index))
     }
 
     var body: some View {
@@ -95,7 +99,7 @@ private struct RootView: View {
             .tag(Tab.record)
 
             NavigationStack {
-                RouteHistoryView(review: review, hasRoutes: !routes.isEmpty, summaryIndex: index)
+                RouteHistoryView(review: review, hasRoutes: !routes.isEmpty, recorder: recorder)
             }
             .tabItem { Label("回顾", systemImage: "calendar") }
             .tag(Tab.review)
@@ -133,11 +137,25 @@ private struct RootView: View {
 #if DEBUG && targetEnvironment(simulator)
 private enum ReviewTestFixture {
     static let scenario = ProcessInfo.processInfo.environment["LIFEMEM_UI_TEST_FIXTURE"]
+    static let storageID = ProcessInfo.processInfo.environment["LIFEMEM_UI_TEST_STORAGE_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
 
     @MainActor
     static func seed(context: ModelContext, names: RoutePlaceNames) throws {
         if scenario == "suggestions" {
             try seedSuggestions(context: context)
+            return
+        }
+        if scenario == "unfinished" {
+            let start = Date.now.addingTimeInterval(-600)
+            let older = RecordedRoute(startedAt: start)
+            let empty = RecordedRoute(startedAt: start.addingTimeInterval(300))
+            context.insert(older)
+            context.insert(empty)
+            let location = CLLocation(coordinate: .init(latitude: 37.3317, longitude: -122.0307),
+                                      altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: start)
+            context.insert(RoutePoint(location: location, mode: .walking, startsNewSegment: true, route: older))
+            older.pointCount = 1
+            try context.save()
             return
         }
         guard scenario == "day" else { return }

@@ -4,6 +4,8 @@ import UIKit
 struct RecordView: View {
     let recorder: RouteRecorder
     @Environment(\.openURL) private var openURL
+    @State private var routeToDiscard: RecordedRoute?
+    @State private var discardFailed = false
 
     private var status: String {
         switch recorder.state {
@@ -56,7 +58,7 @@ struct RecordView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(recorder.state == .requestingPermission)
+                    .disabled(recorder.state == .requestingPermission || (recorder.isDeletingRoute && recorder.state != .recording))
 
                     if recorder.state == .paused, let route = recorder.activeRoute {
                         if route.pointCount > 0 {
@@ -69,6 +71,11 @@ struct RecordView: View {
                         }
                         Button("结束这次记录", action: recorder.finish)
                             .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(recorder.isDeletingRoute)
+                        Button(role: .destructive) { routeToDiscard = route } label: {
+                            Text("丢弃这次记录").frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .disabled(!recorder.canDelete(route))
                     }
                 }
 
@@ -87,6 +94,25 @@ struct RecordView: View {
             .padding(20)
         }
         .navigationTitle("记录")
+        .confirmationDialog("丢弃这次记录？", isPresented: Binding(
+            get: { routeToDiscard != nil },
+            set: { if !$0 { routeToDiscard = nil } }
+        ), titleVisibility: .visible, presenting: routeToDiscard) { route in
+            Button("丢弃记录", role: .destructive) {
+                Task {
+                    do { try await recorder.delete(route) }
+                    catch { discardFailed = true }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("这条记录及其定位点将从手机中删除。")
+        }
+        .alert("暂时无法丢弃记录", isPresented: $discardFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查设备的可用存储空间后重试。")
+        }
     }
 
     private var statusDetail: String {
@@ -97,7 +123,9 @@ struct RecordView: View {
             if recorder.locationUnavailable { "正在等待可用的定位信号。" }
             else if recorder.activeRoute?.pointCount == 0 { "正在寻找第一个定位点。" }
             else { "当前活动 · \(recorder.mode.title)" }
-        case .paused: "已采集的定位点已保存。继续后会从新的位置开始一段路线。"
+        case .paused:
+            if recorder.recoveredUnfinishedRoute { "这条记录尚未结束。继续后会从新的位置开始一段路线。" }
+            else { "已采集的定位点已保存。继续后会从新的位置开始一段路线。" }
         }
     }
 
