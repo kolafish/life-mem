@@ -143,7 +143,7 @@ struct RouteVisit: Identifiable, Codable, Sendable {
     }
 }
 
-struct RoutePlace: Identifiable {
+struct RoutePlace: Identifiable, Sendable {
     var id: RouteVisit.ID { visits[0].id }
     var coordinate: CLLocationCoordinate2D { visits[0].coordinate }
     var mostRecentVisit: RouteVisit { visits[visits.count - 1] }

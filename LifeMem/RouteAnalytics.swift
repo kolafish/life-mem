@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-enum RouteTimeUse: String, CaseIterable, Identifiable {
+enum RouteTimeUse: String, CaseIterable, Identifiable, Sendable {
     case home, work, moving, leisure, exercise, other, untracked
 
     var id: Self { self }
@@ -29,7 +29,93 @@ enum RouteTimeUse: String, CaseIterable, Identifiable {
     }
 }
 
-struct RouteAnalytics {
+struct RouteAnalysisRequest: Hashable, Sendable {
+    struct Scope: Hashable, Sendable {
+        let summaryID: UUID
+        let placesRevision: UUID
+        let calendar: Calendar
+        let range: ClosedRange<Date>
+    }
+
+    let scope: Scope
+    let now: Date
+}
+
+struct RouteAnalysisReport: Sendable {
+    let scope: RouteAnalysisRequest.Scope
+    let analytics: RouteAnalytics
+    let behavior: RouteBehavior?
+    let insights: RouteInsights?
+    let placesByVisits: [RouteAnalytics.PlaceRank]
+    let placesByDuration: [RouteAnalytics.PlaceRank]
+    let placeNumbers: [RouteVisit.ID: Int]
+}
+
+actor RouteAnalysisWorker {
+    private struct History {
+        let summaryID: UUID
+        let calendar: Calendar
+        let patterns: [RouteBehavior.RoutePattern]
+    }
+
+    private struct Period {
+        let scope: RouteAnalysisRequest.Scope
+        let behavior: RouteBehavior
+        let priorHomeShare: Double?
+    }
+
+    private var history: History?
+    private var period: Period?
+    private var previous: (request: RouteAnalysisRequest, report: RouteAnalysisReport)?
+
+    func report(for request: RouteAnalysisRequest, summary: RouteSummary, places: RoutePlaceSnapshot) -> RouteAnalysisReport? {
+        guard !Task.isCancelled else { return nil }
+        if let previous, previous.request == request { return previous.report }
+
+        let scope = request.scope
+        let data = RouteAnalytics(summary: summary, range: scope.range, calendar: scope.calendar, now: request.now, category: places.category(for:))
+        var behavior: RouteBehavior?
+        var insights: RouteInsights?
+        if data.trackedDuration > 0 {
+            guard !Task.isCancelled else { return nil }
+            let hasHome = places.hasCategory(.home)
+            let period: Period
+            if let cached = self.period, cached.scope == scope {
+                period = cached
+            } else {
+                let behavior = RouteBehavior(summary: summary, range: scope.range, calendar: scope.calendar, category: places.category(for:))
+                let priorShare = hasHome ? RouteInsights.homeShareBefore(scope.range.lowerBound, summary: summary,
+                                                                        calendar: scope.calendar, category: places.category(for:)) : nil
+                guard !Task.isCancelled else { return nil }
+                period = Period(scope: scope, behavior: behavior, priorHomeShare: priorShare)
+                self.period = period
+            }
+
+            let patterns: [RouteBehavior.RoutePattern]
+            if let history, history.summaryID == scope.summaryID, history.calendar == scope.calendar {
+                patterns = history.patterns
+            } else {
+                patterns = RouteInsights.routePatterns(in: summary.journeys, calendar: scope.calendar)
+                guard !Task.isCancelled else { return nil }
+                history = History(summaryID: scope.summaryID, calendar: scope.calendar, patterns: patterns)
+            }
+            behavior = period.behavior
+            insights = RouteInsights(summary: summary, analytics: data, range: scope.range, calendar: scope.calendar, now: request.now,
+                                     patterns: patterns, hasHome: hasHome, priorHomeShare: period.priorHomeShare, category: places.category(for:))
+        }
+
+        guard !Task.isCancelled else { return nil }
+        let result = RouteAnalysisReport(
+            scope: scope, analytics: data, behavior: behavior, insights: insights,
+            placesByVisits: data.topPlaces(by: .visits), placesByDuration: data.topPlaces(by: .duration),
+            placeNumbers: Dictionary(uniqueKeysWithValues: data.places.enumerated().map { ($0.element.id, $0.offset + 1) })
+        )
+        previous = (request, result)
+        return result
+    }
+}
+
+struct RouteAnalytics: Sendable {
     enum PlaceRanking: String, CaseIterable, Identifiable {
         case visits = "到访次数"
         case duration = "停留时长"
@@ -37,21 +123,21 @@ struct RouteAnalytics {
         var id: Self { self }
     }
 
-    struct TimeBucket: Identifiable {
+    struct TimeBucket: Identifiable, Sendable {
         let use: RouteTimeUse
         let seconds: TimeInterval
 
         var id: RouteTimeUse { use }
     }
 
-    struct Day: Identifiable {
+    struct Day: Identifiable, Sendable {
         let date: Date
         let time: [TimeBucket]
 
         var id: Date { date }
     }
 
-    struct PlaceRank: Identifiable {
+    struct PlaceRank: Identifiable, Sendable {
         let place: RoutePlace
         let visits: Int
         let seconds: TimeInterval
@@ -88,17 +174,9 @@ struct RouteAnalytics {
         let lastDay = min(calendar.startOfDay(for: range.upperBound), calendar.startOfDay(for: now))
         while day <= lastDay, day < now, let interval = calendar.dateInterval(of: .day, for: day) {
             let elapsed = DateInterval(start: day, end: min(interval.end, now))
-            let summary = summariesByDate[day]
-            var observations = (summary?.movement ?? []).compactMap { item in
-                Self.clip(item, to: elapsed).map { Observation(use: .moving, interval: $0) }
+            var seconds = Self.coverage(summariesByDate[day], during: elapsed, category: category) { visit, duration in
+                durationByVisit[visit.visitID, default: 0] += duration
             }
-            for stay in (summary?.stays ?? []).sorted(by: { $0.startedAt < $1.startedAt }) where stay.duration > 0 {
-                let span = DateInterval(start: stay.startedAt, end: stay.endedAt)
-                guard let observed = Self.clip(span, to: elapsed) else { continue }
-                observations.append(Observation(use: RouteTimeUse(category: category(stay.coordinate)), interval: observed))
-                durationByVisit[stay.visitID, default: 0] += observed.duration
-            }
-            var seconds = Self.observedTime(observations)
             seconds[.untracked] = max(0, elapsed.duration - seconds.values.reduce(0, +))
             for (use, duration) in seconds { totals[use, default: 0] += duration }
             days.append(Day(date: day, time: Self.buckets(seconds)))
@@ -111,6 +189,19 @@ struct RouteAnalytics {
             guard !visitDurations.isEmpty else { return nil }
             return PlaceRank(place: place, visits: visitDurations.count, seconds: visitDurations.reduce(0, +))
         }
+    }
+
+    static func homeShare(in summary: RouteSummary, range: ClosedRange<Date>, calendar: Calendar,
+                          category: (CLLocationCoordinate2D) -> PlaceCategory?) -> Double? {
+        var tracked: TimeInterval = 0
+        var home: TimeInterval = 0
+        for day in summary.days where range.contains(day.date) {
+            guard let interval = calendar.dateInterval(of: .day, for: day.date) else { continue }
+            let seconds = coverage(day, during: interval, category: category) { _, _ in }
+            home += seconds[.home, default: 0]
+            tracked += seconds.values.reduce(0, +)
+        }
+        return tracked > 0 ? home / tracked : nil
     }
 
     func topPlaces(by ranking: PlaceRanking) -> [PlaceRank] {
@@ -134,6 +225,22 @@ struct RouteAnalytics {
         let time: Date
         let observation: Int
         let starts: Bool
+    }
+
+    private static func coverage(_ summary: DailySummary?, during elapsed: DateInterval,
+                                 category: (CLLocationCoordinate2D) -> PlaceCategory?,
+                                 onStay: (StayEvent, TimeInterval) -> Void) -> [RouteTimeUse: TimeInterval] {
+        guard let summary else { return [:] }
+        var observations = summary.movement.compactMap { item in
+            clip(item, to: elapsed).map { Observation(use: .moving, interval: $0) }
+        }
+        for stay in summary.stays.sorted(by: { $0.startedAt < $1.startedAt }) where stay.duration > 0 {
+            let span = DateInterval(start: stay.startedAt, end: stay.endedAt)
+            guard let observed = clip(span, to: elapsed) else { continue }
+            observations.append(Observation(use: RouteTimeUse(category: category(stay.coordinate)), interval: observed))
+            onStay(stay, observed.duration)
+        }
+        return observedTime(observations)
     }
 
     private static func clip(_ interval: DateInterval, to window: DateInterval) -> DateInterval? {

@@ -1,27 +1,28 @@
 import Charts
-import Combine
 import SwiftData
 import SwiftUI
 
 struct AnalyticsView: View {
     let summary: RouteSummary?
+    let isSelected: Bool
 
     @Environment(\.calendar) private var calendar
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var now = Date.now
-    @State private var refreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     @State private var period = Period.week
     @State private var start = Date.now
     @State private var end = Date.now
     @State private var rank = RouteAnalytics.PlaceRanking.visits
     @State private var selectedPattern: PersistentIdentifier?
-    @State private var routeHistory: RouteHistory?
+    @State private var worker = RouteAnalysisWorker()
+    @State private var report: RouteAnalysisReport?
 
-    private struct RouteHistory {
-        let summaryID: UUID
-        let patterns: [RouteBehavior.RoutePattern]
+    private struct ClockRequest: Hashable {
+        let calendar: Calendar
+        let range: ClosedRange<Date>
     }
 
     private enum Period: String, CaseIterable, Identifiable {
@@ -42,11 +43,18 @@ struct AnalyticsView: View {
 
     var body: some View {
         let range = dateRange(at: now)
+        let places = names.snapshot
+        let scope = summary.map {
+            RouteAnalysisRequest.Scope(summaryID: $0.id, placesRevision: places.revision, calendar: calendar, range: range)
+        }
+        let isActive = isSelected && scenePhase == .active
+        let request = isActive ? scope.map { RouteAnalysisRequest(scope: $0, now: now) } : nil
+        let clock = isActive ? ClockRequest(calendar: calendar, range: range) : nil
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 periodSelector
-                if let summary {
-                    let data = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: now, category: names.category(for:))
+                if let report, report.scope == scope {
+                    let data = report.analytics
                     if data.time.isEmpty {
                         ContentUnavailableView(
                             "这段时间尚未开始",
@@ -55,18 +63,11 @@ struct AnalyticsView: View {
                         )
                     } else {
                         timeAllocation(data, range: range)
-                        if !data.places.isEmpty { topPlaces(data) }
-                        if data.trackedDuration > 0 {
-                            let patterns = routeHistory?.summaryID == summary.id ? routeHistory?.patterns ?? [] : []
-                            RouteInsightCards(
-                                insights: RouteInsights(
-                                    summary: summary, analytics: data, range: range, calendar: calendar, now: now,
-                                    patterns: patterns, hasHome: names.hasCategory(.home), category: names.category(for:)
-                                ),
-                                title: { patternTitle($0, index: $1) }
-                            )
-                            behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
+                        if !data.places.isEmpty { topPlaces(report) }
+                        if let insights = report.insights {
+                            RouteInsightCards(insights: insights, title: { patternTitle($0, index: $1) })
                         }
+                        if let behavior = report.behavior { behaviorCards(behavior) }
                     }
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
@@ -76,22 +77,30 @@ struct AnalyticsView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
-        .onAppear { now = .now }
-        .onReceive(refreshTimer) { now = $0 }
-        .task(id: summary?.id) {
-            guard let summary, routeHistory?.summaryID != summary.id else { return }
-            let journeys = summary.journeys
-            let calendar = calendar
-            let grouping = Task.detached(priority: .userInitiated) {
-                RouteInsights.routePatterns(in: journeys, calendar: calendar)
-            }
-            let patterns = await withTaskCancellationHandler {
-                await grouping.value
-            } onCancel: {
-                grouping.cancel()
-            }
+        .task(id: request) {
+            guard let request, let summary,
+                  let result = await worker.report(for: request, summary: summary, places: places),
+                  !Task.isCancelled else { return }
+            report = result
+        }
+        .task(id: clock) {
+            guard let clock else { return }
+            await updateClock(clock)
+        }
+    }
+
+    private func updateClock(_ request: ClockRequest) async {
+        let current = Date.now
+        if !request.calendar.isDate(now, equalTo: current, toGranularity: .minute) { now = current }
+        while !Task.isCancelled {
+            let time = Date.now
+            let today = request.calendar.startOfDay(for: time)
+            let component: Calendar.Component = request.range.contains(today) ? .minute : .day
+            guard let next = request.calendar.dateInterval(of: component, for: time)?.end else { return }
+            do { try await Task.sleep(for: .seconds(next.timeIntervalSince(time))) }
+            catch { return }
             guard !Task.isCancelled else { return }
-            routeHistory = RouteHistory(summaryID: summary.id, patterns: patterns)
+            now = .now
         }
     }
 
@@ -287,9 +296,8 @@ struct AnalyticsView: View {
         return "\(start ?? "起点") → \(end ?? "终点") · \(pattern.mode.recordedTitle)"
     }
 
-    private func topPlaces(_ data: RouteAnalytics) -> some View {
-        let indices = Dictionary(uniqueKeysWithValues: data.places.enumerated().map { ($0.element.id, $0.offset + 1) })
-        let top = data.topPlaces(by: rank)
+    private func topPlaces(_ report: RouteAnalysisReport) -> some View {
+        let top = rank == .visits ? report.placesByVisits : report.placesByDuration
         let maximum = top.map { rank == .visits ? Double($0.visits) : $0.seconds }.max() ?? 1
         return analyticsCard("常去地点") {
             Picker("排行方式", selection: $rank) {
@@ -299,7 +307,7 @@ struct AnalyticsView: View {
             .frame(minHeight: 44)
             ForEach(top) { item in
                 let coordinate = item.place.coordinate
-                let title = resolver.label(near: coordinate, names: names) ?? "停留地点 \(indices[item.id, default: 1])"
+                let title = resolver.label(near: coordinate, names: names) ?? "停留地点 \(report.placeNumbers[item.id, default: 1])"
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title).font(.subheadline.weight(.medium))
                     GeometryReader { geometry in
