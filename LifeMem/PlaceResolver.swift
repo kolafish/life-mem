@@ -28,6 +28,16 @@ final class PlaceResolver {
     private static let searchRadius: CLLocationDistance = 50
     private static let cacheRadius: CLLocationDistance = 25
 
+    struct LookupResponse {
+        let suggestion: MapPlaceSuggestion?
+        let shouldBackOff: Bool
+
+        init(_ suggestion: MapPlaceSuggestion?, shouldBackOff: Bool = false) {
+            self.suggestion = suggestion
+            self.shouldBackOff = shouldBackOff
+        }
+    }
+
     private struct Entry: Codable {
         let latitude: Double
         let longitude: Double
@@ -56,7 +66,7 @@ final class PlaceResolver {
 
     private let file: URL
     private let defaults: UserDefaults
-    private let lookup: (CLLocationCoordinate2D) async throws -> MapPlaceSuggestion?
+    private let lookup: (CLLocationCoordinate2D) async throws -> LookupResponse
     private let clock = ContinuousClock()
     private let minimumInterval: Duration
     private let initialBackoff: Duration
@@ -74,7 +84,7 @@ final class PlaceResolver {
         defaults: UserDefaults = .standard,
         minimumInterval: Duration = .seconds(2),
         initialBackoff: Duration = .seconds(15),
-        lookup: ((CLLocationCoordinate2D) async throws -> MapPlaceSuggestion?)? = nil
+        lookup: ((CLLocationCoordinate2D) async throws -> LookupResponse)? = nil
     ) {
         self.file = file
         self.defaults = defaults
@@ -187,19 +197,22 @@ final class PlaceResolver {
         }
         guard !Task.isCancelled, let active, active.id == id, hasOriginDemand(active) else { return .abandoned }
         nextStart = clock.now.advanced(by: minimumInterval)
-        let result: MapPlaceSuggestion?
+        let result: LookupResponse
         do {
             result = try await lookup(coordinate)
         } catch {
             guard !Task.isCancelled else { return .abandoned }
-            backoff = min(.seconds(60), max(initialBackoff, backoff * 2))
-            retryAfter = clock.now.advanced(by: backoff)
+            backOff()
             return .completed(nil)
         }
         guard !Task.isCancelled, let current = self.active, hasOriginDemand(current) else { return .abandoned }
-        backoff = .zero
-        retryAfter = nil
-        guard let suggestion = result, suggestion.displayName != nil else { return .completed(nil) }
+        if result.shouldBackOff {
+            backOff()
+        } else {
+            backoff = .zero
+            retryAfter = nil
+        }
+        guard let suggestion = result.suggestion, suggestion.displayName != nil else { return .completed(nil) }
         entries.append(Entry(latitude: coordinate.latitude, longitude: coordinate.longitude, suggestion: suggestion))
         if let data = try? JSONEncoder().encode(entries) {
             try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -207,13 +220,20 @@ final class PlaceResolver {
         return .completed(suggestion)
     }
 
-    private static func systemLookup(near coordinate: CLLocationCoordinate2D) async throws -> MapPlaceSuggestion? {
+    private func backOff() {
+        backoff = min(.seconds(60), max(initialBackoff, backoff * 2))
+        retryAfter = clock.now.advanced(by: backoff)
+    }
+
+    private static func systemLookup(near coordinate: CLLocationCoordinate2D) async throws -> LookupResponse {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: searchRadius)
         let items: [MKMapItem]
         var lookupError: Error?
         do {
             items = try await MKLocalSearch(request: request).start().mapItems
+        } catch let error as MKError where error.code == .loadingThrottled {
+            throw error
         } catch let error as MKError where error.code == .placemarkNotFound {
             items = []
         } catch {
@@ -251,9 +271,9 @@ final class PlaceResolver {
             .filter { !$0.isEmpty && seen.insert($0).inserted }
         let suggestion = MapPlaceSuggestion(pointOfInterestNames: Array(names.prefix(5)), streetOrArea: result?.streetOrArea,
                                             district: result?.district, city: result?.city)
-        if suggestion.displayName != nil { return suggestion }
+        if suggestion.displayName != nil { return LookupResponse(suggestion, shouldBackOff: lookupError != nil) }
         if let lookupError { throw lookupError }
-        return nil
+        return LookupResponse(nil)
     }
 
     private static func reverseGeocode(_ location: CLLocation) async throws -> MapPlaceSuggestion? {
