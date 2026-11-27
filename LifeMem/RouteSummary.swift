@@ -24,6 +24,14 @@ struct RouteSummaryRecord: Codable, Sendable {
     let days: [DailySummary]
     let visits: [RouteVisit]
     let journeys: [RouteJourney]
+
+    fileprivate var hasValidTimes: Bool {
+        days.allSatisfy { day in
+            day.movement.allSatisfy { $0.duration.isFinite && $0.duration >= 0 } &&
+                day.stays.allSatisfy { $0.duration.isFinite && $0.duration >= 0 }
+        } && visits.allSatisfy { $0.startedAt <= $0.endedAt } &&
+            journeys.allSatisfy { $0.duration.isFinite && $0.duration > 0 }
+    }
 }
 
 struct RouteSummary {
@@ -56,7 +64,12 @@ actor RouteSummaryIndex {
     }
 
     private let file: URL
-    private lazy var index = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Index.self, from: $0) }
+    private var excludedRoutes: Set<UUID> = []
+    private lazy var index: Index? = {
+        guard let data = try? Data(contentsOf: file), let decoded = try? JSONDecoder().decode(Index.self, from: data),
+              decoded.version == Self.version else { return nil }
+        return Index(version: decoded.version, calendar: decoded.calendar, records: decoded.records.filter { $0.value.hasValidTimes })
+    }()
 
     init(file: URL) {
         self.file = file
@@ -64,20 +77,53 @@ actor RouteSummaryIndex {
 
     func records(for revision: RouteReviewRevision) -> [RouteReviewRevision.RouteVersion: RouteSummaryRecord] {
         guard let index, index.version == Self.version, index.calendar == revision.calendar else { return [:] }
-        return revision.routes.reduce(into: [:]) { $0[$1] = index.records[$1] }
+        return revision.routes.filter { !excludedRoutes.contains($0.id) }.reduce(into: [:]) { $0[$1] = index.records[$1] }
     }
 
-    func save(_ records: [RouteReviewRevision.RouteVersion: RouteSummaryRecord], for revision: RouteReviewRevision) {
+    func save(
+        _ records: [RouteReviewRevision.RouteVersion: RouteSummaryRecord],
+        for revision: RouteReviewRevision, after delay: Duration = .zero
+    ) async {
+        if delay > .zero {
+            do { try await Task.sleep(for: delay) } catch { return }
+        }
         guard !Task.isCancelled else { return }
+        let records = records.filter { !excludedRoutes.contains($0.key.id) }
         if let index, index.version == Self.version, index.calendar == revision.calendar,
            index.records.keys == records.keys { return }
         let updated = Index(version: Self.version, calendar: revision.calendar, records: records)
-        guard let data = try? JSONEncoder().encode(updated), !Task.isCancelled else { return }
         do {
-            try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            index = updated
+            try write(updated)
         } catch {
             // The cache is optional and a later load can reconstruct a failed write.
         }
+    }
+
+    func prepareToDelete(routeID: UUID) throws {
+        excludedRoutes.insert(routeID)
+        do {
+            if let current = index {
+                let retained = current.records.filter { !excludedRoutes.contains($0.key.id) }
+                try write(Index(version: current.version, calendar: current.calendar, records: retained))
+            } else {
+                do {
+                    try FileManager.default.removeItem(at: file)
+                } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                }
+            }
+        } catch {
+            excludedRoutes.remove(routeID)
+            throw error
+        }
+    }
+
+    func cancelDeletion(routeID: UUID) {
+        excludedRoutes.remove(routeID)
+    }
+
+    private func write(_ updated: Index) throws {
+        let data = try JSONEncoder().encode(updated)
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        index = updated
     }
 }

@@ -95,7 +95,7 @@ private struct RootView: View {
             .tag(Tab.record)
 
             NavigationStack {
-                RouteHistoryView(review: review, hasRoutes: !routes.isEmpty)
+                RouteHistoryView(review: review, hasRoutes: !routes.isEmpty, summaryIndex: index)
             }
             .tabItem { Label("回顾", systemImage: "calendar") }
             .tag(Tab.review)
@@ -117,7 +117,7 @@ private struct RootView: View {
                   request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
             let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
             summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] })
-            await index.save(records, for: request.revision)
+            await index.save(records, for: request.revision, after: .seconds(1))
         }
         .alert("Life Mem", isPresented: Binding(
             get: { recorder.notice != nil },

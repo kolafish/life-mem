@@ -400,6 +400,8 @@ struct RouteChecks {
         precondition(afterAppend.days.map(\.movingDuration) == [50, 30])
 
         let afterDeletion = RouteReviewRevision(calendar: calendar, routes: [stay])
+        try await reopened.prepareToDelete(routeID: walk.id)
+        await reopened.save(records, for: revision)
         let surviving = await reopened.records(for: afterDeletion)
         await reopened.save(surviving, for: afterDeletion)
         let pruned = await RouteSummaryIndex(file: file).records(for: revision)
