@@ -77,6 +77,26 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(routine.isHittable)
     }
 
+    func testPlaceSuggestionRequiresConfirmation() {
+        let app = launch(fixture: "suggestions")
+        app.tabBars.buttons["回顾"].tap()
+        let places = app.buttons["地点"]
+        XCTAssertTrue(places.waitForExistence(timeout: 8))
+        places.tap()
+        let suggestionLink = app.descendants(matching: .any).matching(identifier: "place-suggestion-home").firstMatch
+        XCTAssertTrue(suggestionLink.waitForExistence(timeout: 8), app.debugDescription)
+        suggestionLink.tap()
+        let confirm = app.buttons["设为家"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        app.buttons["取消"].tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        app.buttons["保存"].tap()
+        XCTAssertTrue(app.buttons["编辑地名"].waitForExistence(timeout: 5))
+        XCTAssertFalse(confirm.exists)
+    }
+
     private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extraArguments

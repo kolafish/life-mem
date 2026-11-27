@@ -91,6 +91,7 @@ struct RouteChecks {
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
         try checkBehavior(context: context)
+        try checkPlaceSuggestions(context: context)
         try checkPlaceNames(in: root)
         try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
@@ -522,6 +523,49 @@ struct RouteChecks {
         }
         precondition(Set(overnightRoutine.routine.map(\.kind)) == [.departure, .arrival])
         precondition(overnightRoutine.routine.allSatisfy { $0.day == midnight && $0.time == midnight.addingTimeInterval(10) })
+    }
+
+    @MainActor
+    private static func checkPlaceSuggestions(context: ModelContext) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let weekday = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
+        let route = insertRoute(context: context, start: weekday,
+                                samples: (0..<8).map { (Double($0 * 10), 0, .unknown, $0 == 0) })
+        try context.save()
+        let ids = route.points.map(\.persistentModelID)
+        var visits: [RouteVisit] = []
+        for index in 0..<4 {
+            let day = calendar.date(byAdding: .day, value: index, to: weekday)!
+            let midnight = day.addingTimeInterval(-3_600)
+            visits.append(RouteVisit(id: ids[index], date: calendar.startOfDay(for: midnight),
+                                     startedAt: midnight, endedAt: day.addingTimeInterval(7 * 3_600),
+                                     coordinate: .init(latitude: 0, longitude: 0)))
+            let work = day.addingTimeInterval(11 * 3_600)
+            visits.append(RouteVisit(id: ids[index + 4], date: day, startedAt: work,
+                                     endedAt: work.addingTimeInterval(3_600), coordinate: .init(latitude: 0, longitude: 0.02)))
+        }
+        let places = RoutePlace.group(visits, within: RouteReview.placeRadius)
+        let now = calendar.date(byAdding: .day, value: 5, to: weekday)!
+        let suggestions = PlaceSuggestions.candidates(in: places, calendar: calendar, now: now) { _ in nil }
+        precondition(suggestions.map(\.category) == [.home, .work] && suggestions.allSatisfy { $0.observedDays == 4 })
+        let confirmed = PlaceSuggestions.candidates(in: places, calendar: calendar, now: now) {
+            $0.longitude == 0 ? .home : nil
+        }
+        precondition(confirmed.map(\.category) == [.work])
+        let sparse = PlaceSuggestions.candidates(in: places, calendar: calendar, now: weekday.addingTimeInterval(3_600)) { _ in nil }
+        precondition(sparse.isEmpty)
+
+        let weekend = calendar.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: 11))!
+        let weekends = [0, 7, 14].enumerated().map { index, offset in
+            let time = calendar.date(byAdding: .day, value: offset, to: weekend)!
+            return RouteVisit(id: ids[index], date: calendar.startOfDay(for: time),
+                              startedAt: time, endedAt: time.addingTimeInterval(3_600),
+                              coordinate: .init(latitude: 0, longitude: 0.04))
+        }
+        let weekendPlaces = RoutePlace.group(weekends, within: RouteReview.placeRadius)
+        let weekendOnly = PlaceSuggestions.candidates(in: weekendPlaces, calendar: calendar, now: now) { _ in nil }
+        precondition(weekendOnly.isEmpty)
     }
 
     @MainActor

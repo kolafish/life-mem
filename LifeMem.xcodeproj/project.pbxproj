@@ -29,6 +29,7 @@
 		AA0000000000000000000414 /* SavedPlace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000314 /* SavedPlace.swift */; };
 		AA0000000000000000000415 /* RouteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000315 /* RouteStore.swift */; };
 		AA0000000000000000000420 /* RouteSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000320 /* RouteSummary.swift */; };
+		AA0000000000000000000430 /* PlaceSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000330 /* PlaceSuggestions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,6 +69,7 @@
 		AA0000000000000000000314 /* SavedPlace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPlace.swift; sourceTree = "<group>"; };
 		AA0000000000000000000315 /* RouteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteStore.swift; sourceTree = "<group>"; };
 		AA0000000000000000000320 /* RouteSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSummary.swift; sourceTree = "<group>"; };
+		AA0000000000000000000330 /* PlaceSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSuggestions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -88,6 +90,7 @@
 				AA0000000000000000000003 /* RouteRecorder.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
+				AA0000000000000000000330 /* PlaceSuggestions.swift */,
 				AA0000000000000000000320 /* RouteSummary.swift */,
 				AA0000000000000000000315 /* RouteStore.swift */,
 				AA0000000000000000000314 /* SavedPlace.swift */,
@@ -176,6 +179,7 @@
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
+				AA0000000000000000000430 /* PlaceSuggestions.swift in Sources */,
 				AA0000000000000000000420 /* RouteSummary.swift in Sources */,
 				AA0000000000000000000415 /* RouteStore.swift in Sources */,
 				AA0000000000000000000414 /* SavedPlace.swift in Sources */,
