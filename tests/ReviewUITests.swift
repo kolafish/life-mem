@@ -47,7 +47,7 @@ final class ReviewUITests: XCTestCase {
         app.alerts.buttons["取消"].tap()
         app.tabBars.buttons["分析"].tap()
         XCTAssertTrue(app.staticTexts["时间分配与记录覆盖"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["未记录"].exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "未记录")).firstMatch.exists)
     }
 
     func testAnalyticsPeriodAndRanking() {

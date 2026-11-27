@@ -290,7 +290,7 @@ struct RouteChecks {
         precondition((afterMidnight[0].stay?.duration ?? 0) + (beforeMidnight[0].stay?.duration ?? 0) == 480)
         precondition(midnightReview.places[0].mostRecentVisit.id == beforeMidnight[0].id)
 
-        let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay, calendar: calendar) { _ in .home }
+        let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay, calendar: calendar, now: nextDay.addingTimeInterval(86_400)) { _ in .home }
         precondition(bothDays.days.map(\.date) == [day, nextDay])
         precondition(bothDays.time.first { $0.use == .home }?.seconds == 420)
         precondition(bothDays.time.first { $0.use == .moving }?.seconds == 60)
@@ -298,7 +298,7 @@ struct RouteChecks {
         precondition(bothDays.time.first { $0.use == .untracked }?.seconds == 2 * 86_400 - 480)
         precondition(midnightReview.days.allSatisfy { $0.movingDuration == 30 })
         precondition(bothDays.places.count == 1 && bothDays.places[0].visits == 1 && bothDays.places[0].seconds == 480)
-        let onlyNextDay = RouteAnalytics(review: midnightReview, range: nextDay...nextDay, calendar: calendar) { _ in nil }
+        let onlyNextDay = RouteAnalytics(review: midnightReview, range: nextDay...nextDay, calendar: calendar, now: nextDay.addingTimeInterval(86_400)) { _ in nil }
         precondition(onlyNextDay.time.first { $0.use == .other }?.seconds == 330)
         precondition(onlyNextDay.places[0].visits == 1 && onlyNextDay.places[0].seconds == 360)
 
@@ -312,7 +312,7 @@ struct RouteChecks {
             (Double($0), 0.05, .stationary, $0 == 0)
         })
         let rankedReview = RouteReview(routes: [outing, repeatedVisit, longVisit], calendar: calendar)
-        let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day, calendar: calendar) { _ in nil }
+        let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day, calendar: calendar, now: nextDay) { _ in nil }
         precondition(ranked.topPlaces(by: .visits).first?.visits == 2)
         precondition(ranked.topPlaces(by: .duration).first?.seconds == 1_200)
     }

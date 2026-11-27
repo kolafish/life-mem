@@ -32,36 +32,39 @@ struct AnalyticsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                periodSelector
-                if let summary {
-                    let data = RouteAnalytics(summary: summary, range: dateRange, calendar: calendar, category: names.category(for:))
-                    if data.time.isEmpty {
-                        ContentUnavailableView(
-                            "这段时间尚未开始",
-                            systemImage: "calendar",
-                            description: Text("可以选择包含今天或过去日期的范围。")
-                        )
-                    } else {
-                        timeAllocation(data)
-                        if !data.places.isEmpty { topPlaces(data) }
-                        if data.trackedDuration > 0 {
-                            behaviorCards(RouteBehavior(summary: summary, range: dateRange, calendar: calendar, category: names.category(for:)))
+        TimelineView(.periodic(from: .now, by: 60)) { tick in
+            let range = dateRange(at: tick.date)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    periodSelector
+                    if let summary {
+                        let data = RouteAnalytics(summary: summary, range: range, calendar: calendar, now: tick.date, category: names.category(for:))
+                        if data.time.isEmpty {
+                            ContentUnavailableView(
+                                "这段时间尚未开始",
+                                systemImage: "calendar",
+                                description: Text("可以选择包含今天或过去日期的范围。")
+                            )
+                        } else {
+                            timeAllocation(data, range: range)
+                            if !data.places.isEmpty { topPlaces(data) }
+                            if data.trackedDuration > 0 {
+                                behaviorCards(RouteBehavior(summary: summary, range: range, calendar: calendar, category: names.category(for:)))
+                            }
                         }
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity)
                     }
-                } else {
-                    ProgressView().frame(maxWidth: .infinity)
                 }
+                .padding(16)
             }
-            .padding(16)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("分析")
     }
 
-    private var dateRange: ClosedRange<Date> {
-        if let component = period.interval, let interval = calendar.dateInterval(of: component, for: .now) {
+    private func dateRange(at now: Date) -> ClosedRange<Date> {
+        if let component = period.interval, let interval = calendar.dateInterval(of: component, for: now) {
             return interval.start...calendar.startOfDay(for: interval.end.addingTimeInterval(-1))
         }
         return calendar.startOfDay(for: start)...calendar.startOfDay(for: max(start, end))
@@ -87,7 +90,7 @@ struct AnalyticsView: View {
         }
     }
 
-    private func timeAllocation(_ data: RouteAnalytics) -> some View {
+    private func timeAllocation(_ data: RouteAnalytics, range: ClosedRange<Date>) -> some View {
         analyticsCard("时间分配与记录覆盖") {
             Text("已记录 \(routeDuration(data.trackedDuration)) / \(routeDuration(data.elapsedDuration))")
                 .font(.subheadline.monospacedDigit())
@@ -126,7 +129,7 @@ struct AnalyticsView: View {
             .chartForegroundStyleScale(domain: RouteTimeUse.allCases.map(\.title), range: RouteTimeUse.allCases.map(\.color))
             .chartLegend(.hidden)
             .chartYAxisLabel("小时")
-            .chartXScale(domain: chartDays(data.days))
+            .chartXScale(domain: chartDays(data.days, fallback: range.lowerBound))
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                     AxisGridLine()
@@ -137,8 +140,8 @@ struct AnalyticsView: View {
         }
     }
 
-    private func chartDays(_ days: [RouteAnalytics.Day]) -> ClosedRange<Date> {
-        let start = days.first?.date ?? dateRange.lowerBound
+    private func chartDays(_ days: [RouteAnalytics.Day], fallback: Date) -> ClosedRange<Date> {
+        let start = days.first?.date ?? fallback
         let last = days.last?.date ?? start
         return start...(calendar.date(byAdding: .day, value: 1, to: last) ?? last)
     }
