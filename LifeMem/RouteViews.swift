@@ -5,12 +5,16 @@ import SwiftUI
 struct RouteHistoryView: View {
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
 
     @State private var mode = BrowseMode.timeline
     @State private var review: RouteReview?
     @State private var showsArchive = false
+    @State private var confirmsAutomaticLookup = false
+    @State private var confirmsCacheRemoval = false
+    @State private var cacheRemovalFailed = false
 
     private enum BrowseMode: String, CaseIterable {
         case timeline = "时间线"
@@ -41,16 +45,50 @@ struct RouteHistoryView: View {
         }
         .navigationTitle("回顾")
         .toolbar {
-            if !routes.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsArchive = true
-                    } label: {
-                        Label("管理记录", systemImage: "ellipsis.circle")
-                            .labelStyle(.iconOnly)
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if !routes.isEmpty {
+                        Button("管理记录", systemImage: "tray.full") { showsArchive = true }
                     }
+                    if placeResolver.isAutomaticEnabled {
+                        Button("关闭自动地名", systemImage: "mappin.slash") {
+                            placeResolver.setAutomaticEnabled(false)
+                        }
+                    } else {
+                        Button("开启自动地名", systemImage: "mappin.and.ellipse") {
+                            confirmsAutomaticLookup = true
+                        }
+                    }
+                    Button("清除地名建议缓存", systemImage: "trash", role: .destructive) {
+                        confirmsCacheRemoval = true
+                    }
+                } label: {
+                    Label("回顾选项", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
                 }
             }
+        }
+        .alert("开启自动地名？", isPresented: $confirmsAutomaticLookup) {
+            Button("开启") { placeResolver.setAutomaticEnabled(true) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("打开回顾时，系统地图会使用未命名停留的中心坐标查找附近地名。可以随时在回顾选项里关闭。")
+        }
+        .alert("清除地名建议缓存？", isPresented: $confirmsCacheRemoval) {
+            Button("清除", role: .destructive) {
+                do {
+                    try placeResolver.clearCache()
+                } catch {
+                    cacheRemovalFailed = true
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会删除缓存的地图建议及查询坐标。你保存的地名仍可使用。")
+        }
+        .alert("暂时无法清除缓存", isPresented: $cacheRemovalFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查设备的可用存储空间后重试。")
         }
         .sheet(isPresented: $showsArchive) {
             NavigationStack { RouteArchiveView() }
@@ -70,7 +108,7 @@ struct RouteHistoryView: View {
             ContentUnavailableView("暂无停留地点", systemImage: "mappin.circle", description: Text("记录到持续停留后，可以在这里回看历次到访。"))
         } else {
             List(review.places) { place in
-                let name = placeNames.name(for: place.coordinate)
+                let name = placeResolver.label(near: place.coordinate, names: placeNames)
                 let visitCount = "\(place.visits.count) 次到访"
                 let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
                 NavigationLink {
@@ -114,7 +152,7 @@ struct RouteHistoryView: View {
     }
 
     private func daySummary(_ day: RouteReviewDay) -> String {
-        let name = day.entries.lazy.compactMap(\.visitCoordinate).compactMap { placeNames.name(for: $0) }.first
+        let name = day.entries.lazy.compactMap(\.visitCoordinate).compactMap { placeResolver.label(near: $0, names: placeNames) }.first
         return name.map { "\(day.summary) · \($0)" } ?? day.summary
     }
 
@@ -149,10 +187,11 @@ private struct RoutePlaceReviewView: View {
     let days: [RouteReviewDay]
 
     @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @State private var namingTarget: PlaceNamingTarget?
 
     var body: some View {
-        let name = placeNames.name(for: place.coordinate)
+        let name = placeResolver.label(near: place.coordinate, names: placeNames)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
             Section {
@@ -166,7 +205,7 @@ private struct RoutePlaceReviewView: View {
                 .frame(height: 220)
                 .accessibilityLabel("停留地点地图")
                 .listRowInsets(EdgeInsets())
-                Button(name == nil ? "给地点命名" : "编辑地名") {
+                Button(placeNames.name(for: place.coordinate) == nil ? "给地点命名" : "编辑地名") {
                     namingTarget = PlaceNamingTarget(title: "停留地点", coordinate: place.coordinate)
                 }
                 .frame(minHeight: 44, alignment: .leading)
@@ -189,8 +228,16 @@ private struct RoutePlaceReviewView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(name ?? "停留地点")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: placeResolver.isAutomaticEnabled && namingTarget == nil) {
+            guard placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
+            await placeResolver.resolveAutomatically(near: place.coordinate, names: placeNames)
+        }
         .sheet(item: $namingTarget) { target in
-            PlaceNamingView(target: target, initialName: placeNames.name(for: target.coordinate))
+            PlaceNamingView(
+                target: target,
+                initialName: placeNames.name(for: target.coordinate),
+                category: placeNames.category(for: target.coordinate)
+            )
         }
     }
 }
@@ -198,6 +245,7 @@ private struct RoutePlaceReviewView: View {
 private struct RouteDayReviewView: View {
     let day: RouteReviewDay
     @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @State private var selectedID: RouteReviewEntry.ID?
     @State private var namingTarget: PlaceNamingTarget?
 
@@ -271,8 +319,19 @@ private struct RouteDayReviewView: View {
         }
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: placeResolver.isAutomaticEnabled && namingTarget == nil) {
+            guard placeResolver.isAutomaticEnabled, namingTarget == nil else { return }
+            for coordinate in day.entries.compactMap(\.visitCoordinate) {
+                guard !Task.isCancelled else { return }
+                await placeResolver.resolveAutomatically(near: coordinate, names: placeNames)
+            }
+        }
         .sheet(item: $namingTarget) { target in
-            PlaceNamingView(target: target, initialName: placeNames.name(for: target.coordinate))
+            PlaceNamingView(
+                target: target,
+                initialName: placeNames.name(for: target.coordinate),
+                category: placeNames.category(for: target.coordinate)
+            )
         }
     }
 
@@ -300,13 +359,13 @@ private struct RouteDayReviewView: View {
 
     private func title(for entry: RouteReviewEntry) -> String {
         if let endpoints = entry.endpoints {
-            let start = placeNames.name(for: endpoints.start)
-            let end = placeNames.name(for: endpoints.end)
+            let start = placeResolver.label(near: endpoints.start, names: placeNames)
+            let end = placeResolver.label(near: endpoints.end, names: placeNames)
             if start != nil || end != nil {
                 return "\(start ?? "起点") → \(end ?? "终点")"
             }
         }
-        if let coordinate = entry.visitCoordinate, let name = placeNames.name(for: coordinate) {
+        if let coordinate = entry.visitCoordinate, let name = placeResolver.label(near: coordinate, names: placeNames) {
             return name
         }
         return entry.title
@@ -430,6 +489,7 @@ private struct ReviewMap: View {
     let entries: [RouteReviewEntry]
     let focused: Bool
     @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @State private var position: MapCameraPosition = .automatic
 
     private struct Viewport: Equatable {
@@ -446,7 +506,11 @@ private struct ReviewMap: View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
             ForEach(entries) { entry in
                 if let coordinate = entry.visitCoordinate {
-                    Marker(placeNames.name(for: coordinate) ?? "停留", systemImage: "mappin", coordinate: coordinate)
+                    Marker(
+                        placeResolver.label(near: coordinate, names: placeNames) ?? "停留",
+                        systemImage: placeNames.category(for: coordinate)?.symbol ?? "mappin",
+                        coordinate: coordinate
+                    )
                         .tint(.teal)
                 } else {
                     ForEach(entry.segments) { segment in
@@ -477,8 +541,8 @@ private struct ReviewMap: View {
     private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
         let segments = entry.segments.filter { $0.mode != .stationary }
         if let start = segments.first?.startCoordinate, let end = segments.last?.coordinates.last {
-            let startName = entry.endpoints.flatMap { placeNames.name(for: $0.start) }
-            let endName = entry.endpoints.flatMap { placeNames.name(for: $0.end) }
+            let startName = entry.endpoints.flatMap { placeResolver.label(near: $0.start, names: placeNames) }
+            let endName = entry.endpoints.flatMap { placeResolver.label(near: $0.end, names: placeNames) }
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
                 Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: start).tint(.indigo)
             } else {

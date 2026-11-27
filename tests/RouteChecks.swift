@@ -5,7 +5,7 @@ import SwiftData
 @main
 struct RouteChecks {
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3_600)
         let first = location(longitude: 0, at: start)
         let nearby = location(longitude: 0.00012, at: start.addingTimeInterval(10))
@@ -88,6 +88,7 @@ struct RouteChecks {
         try checkReview(context: context)
         try checkSemanticTimeline(context: context)
         try checkPlaceNames(in: root)
+        try await checkPlaceResolver(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
@@ -274,14 +275,17 @@ struct RouteChecks {
         let start = CLLocationCoordinate2D(latitude: 0, longitude: 0)
         let nearby = CLLocationCoordinate2D(latitude: 0, longitude: 0.0002)
         let end = CLLocationCoordinate2D(latitude: 0, longitude: 0.0100)
+        let legacy = Data(#"[{"name":"旧版地点","latitude":0,"longitude":0}]"#.utf8)
+        try legacy.write(to: file)
         let names = RoutePlaceNames(file: file)
-        precondition(names.name(for: start) == nil)
-        try names.save(" 河滨公园 ", for: start)
+        precondition(names.name(for: start) == "旧版地点" && names.category(for: start) == nil)
+        try names.save(" 河滨公园 ", category: .leisure, for: start)
         try names.save("市图书馆", for: end)
         precondition(names.name(for: nearby) == "河滨公园")
 
         let reopened = RoutePlaceNames(file: file)
         precondition(reopened.name(for: end) == "市图书馆")
+        precondition(reopened.category(for: nearby) == .leisure)
         try reopened.save("公园入口", for: nearby)
         precondition(reopened.name(for: start) == "公园入口")
         try reopened.save(nil, for: start)
@@ -300,6 +304,43 @@ struct RouteChecks {
             let persisted = try Data(contentsOf: invalidFile)
             precondition(persisted == invalid)
         }
+    }
+
+    @MainActor
+    private static func checkPlaceResolver(in directory: URL) async throws {
+        let suite = "LifeMemTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let file = directory.appending(path: "place-suggestions.json")
+        let names = RoutePlaceNames(file: directory.appending(path: "test-aliases.json"))
+        let place = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let neighbor = CLLocationCoordinate2D(latitude: 0, longitude: 0.00012)
+        let anotherPlace = CLLocationCoordinate2D(latitude: 0, longitude: 0.01)
+        var requests = 0
+        let resolver = PlaceResolver(file: file, defaults: defaults) { _ in
+            requests += 1
+            return MapPlaceSuggestion(pointOfInterestNames: ["市图书馆"], streetOrArea: "书院路", district: nil, city: nil)
+        }
+        await resolver.resolveAutomatically(near: place, names: names)
+        precondition(requests == 0)
+        resolver.setAutomaticEnabled(true)
+        await resolver.resolveAutomatically(near: place, names: names)
+        await resolver.resolveAutomatically(near: neighbor, names: names)
+        precondition(requests == 1)
+        precondition(resolver.label(near: neighbor, names: names) == "市图书馆附近")
+        try names.save("最喜欢的图书馆", category: .leisure, for: place)
+        try names.save("家", category: .home, for: anotherPlace)
+        await resolver.resolveAutomatically(near: anotherPlace, names: names)
+        precondition(requests == 1)
+        precondition(resolver.label(near: neighbor, names: names) == "最喜欢的图书馆")
+        resolver.setAutomaticEnabled(false)
+        let reopened = PlaceResolver(file: file, defaults: defaults) { _ in nil }
+        precondition(!reopened.isAutomaticEnabled)
+        precondition(reopened.cached(near: neighbor)?.candidates == ["市图书馆", "书院路附近"])
+        try reopened.clearCache()
+        let cleared = PlaceResolver(file: file, defaults: defaults) { _ in nil }
+        precondition(cleared.cached(near: neighbor) == nil)
+        precondition(cleared.label(near: neighbor, names: names) == "最喜欢的图书馆")
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)
