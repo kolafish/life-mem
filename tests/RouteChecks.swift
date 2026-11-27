@@ -152,7 +152,8 @@ struct RouteChecks {
         precondition(walk.mode == .walking && walk.duration == 600)
         precondition(drive.mode == .automotive && drive.duration == 1_200)
         let expected = location(longitude: 0, at: day).distance(from: location(longitude: 0.15, at: day))
-        precondition(abs(walk.distanceMeters + drive.distanceMeters - expected) < 5)
+        precondition(abs(review.days[0].movingDistanceMeters - expected) < 5)
+        precondition(review.days[0].movingDuration == 1_800 && review.days[0].stays.count == 2)
         precondition(entries.last?.kind == .fragment && entries.last?.followsGap == true)
 
         let shortTrip = insertRoute(context: context, start: day, samples: stop(start: 0, longitude: 0) + [

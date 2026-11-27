@@ -13,7 +13,18 @@
 		AA0000000000000000000015 /* RouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* RouteViews.swift */; };
 		AA0000000000000000000018 /* PlaceNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* PlaceNamingView.swift */; };
 		AA0000000000000000000019 /* PlaceResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* PlaceResolver.swift */; };
+		AA0000000000000000000081 /* ReviewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* ReviewUITests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AA0000000000000000000089 /* App proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000032 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000031;
+			remoteInfo = LifeMem;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000001 /* LifeMemApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeMemApp.swift; sourceTree = "<group>"; };
@@ -25,6 +36,8 @@
 		AA0000000000000000000007 /* LifeMem.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = LifeMem.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000008 /* PlaceNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceNamingView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000009 /* PlaceResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceResolver.swift; sourceTree = "<group>"; };
+		AA0000000000000000000080 /* ReviewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = tests/ReviewUITests.swift; sourceTree = "<group>"; };
+		AA0000000000000000000082 /* LifeMemUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LifeMemUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -32,6 +45,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000022 /* LifeMem */,
+				AA0000000000000000000080 /* ReviewUITests.swift */,
 				AA0000000000000000000023 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,7 +67,7 @@
 		};
 		AA0000000000000000000023 /* Products */ = {
 			isa = PBXGroup;
-			children = (AA0000000000000000000007 /* LifeMem.app */);
+			children = (AA0000000000000000000007 /* LifeMem.app */, AA0000000000000000000082 /* LifeMemUITests.xctest */);
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -71,6 +85,16 @@
 			productReference = AA0000000000000000000007 /* LifeMem.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA0000000000000000000083 /* LifeMemUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000085 /* UI test configurations */;
+			buildPhases = (AA0000000000000000000084 /* Test Sources */);
+			dependencies = (AA0000000000000000000088 /* App dependency */);
+			name = LifeMemUITests;
+			productName = LifeMemUITests;
+			productReference = AA0000000000000000000082 /* LifeMemUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -81,6 +105,7 @@
 				LastUpgradeCheck = 2720;
 				TargetAttributes = {
 					AA0000000000000000000031 = {CreatedOnToolsVersion = 27.2; };
+					AA0000000000000000000083 = {TestTargetID = AA0000000000000000000031; };
 				};
 			};
 			buildConfigurationList = AA0000000000000000000051 /* Project configurations */;
@@ -92,7 +117,7 @@
 			productRefGroup = AA0000000000000000000023 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (AA0000000000000000000031 /* LifeMem */);
+			targets = (AA0000000000000000000031 /* LifeMem */, AA0000000000000000000083 /* LifeMemUITests */);
 		};
 /* End PBXProject section */
 
@@ -111,7 +136,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000084 /* Test Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AA0000000000000000000081 /* ReviewUITests.swift in Sources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0000000000000000000088 /* App dependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000031 /* LifeMem */;
+			targetProxy = AA0000000000000000000089 /* App proxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000061 /* Project Debug */ = {
@@ -176,6 +215,34 @@
 			};
 			name = Release;
 		};
+		AA0000000000000000000086 /* UI Tests Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kolafish.lifemem.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = LifeMem;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000087 /* UI Tests Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kolafish.lifemem.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = LifeMem;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -188,6 +255,12 @@
 		AA0000000000000000000052 /* Target configurations */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (AA0000000000000000000063 /* Target Debug */, AA0000000000000000000064 /* Target Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000085 /* UI test configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (AA0000000000000000000086 /* UI Tests Debug */, AA0000000000000000000087 /* UI Tests Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
