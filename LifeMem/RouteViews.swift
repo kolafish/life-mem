@@ -249,7 +249,9 @@ private struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var selectedID: RouteReviewEntry.ID?
+    @State private var focusRequest = UUID()
     @State private var namingTarget: PlaceNamingTarget?
     private let initialFocus: RouteReviewEntry.ID?
 
@@ -288,13 +290,13 @@ private struct RouteDayReviewView: View {
                                 }
                             }
                             .frame(minHeight: 44)
-                            ReviewMap(entries: day.entries, selected: selected) { id in
-                                selectedID = id
+                            ReviewMap(entries: day.entries, selected: selected, focusRequest: focusRequest) { id in
+                                focus(on: id)
                                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
                                     proxy.scrollTo(id, anchor: .bottom)
                                 }
                             }
-                            .frame(height: 184)
+                            .frame(height: typeSize.isAccessibilitySize ? 145 : 184)
                             .clipShape(.rect(cornerRadius: 16))
                         }
                         .padding(.bottom, 8)
@@ -334,7 +336,7 @@ private struct RouteDayReviewView: View {
         let color = category?.mapColor ?? (entry.kind == .visit ? .teal : moves.first?.mode.mapColor ?? .secondary)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
-                selectedID = entry.id
+                focus(on: entry.id)
             } label: {
                 HStack(alignment: .center, spacing: 12) {
                     Image(systemName: category?.symbol ?? entry.symbol)
@@ -404,6 +406,11 @@ private struct RouteDayReviewView: View {
 
     private func namePlace(_ title: String, at coordinate: CLLocationCoordinate2D) {
         namingTarget = PlaceNamingTarget(title: title, coordinate: coordinate)
+    }
+
+    private func focus(on id: RouteReviewEntry.ID) {
+        selectedID = id
+        focusRequest = UUID()
     }
 
     private func title(for entry: RouteReviewEntry) -> String {
@@ -619,6 +626,7 @@ private struct RouteArchiveView: View {
 private struct ReviewMap: View {
     let entries: [RouteReviewEntry]
     let selected: RouteReviewEntry?
+    let focusRequest: UUID
     let selectStay: (RouteReviewEntry.ID) -> Void
 
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -628,6 +636,7 @@ private struct ReviewMap: View {
     private struct Viewport: Equatable {
         let selection: RouteReviewEntry.ID?
         let endedAt: Date?
+        let request: UUID
     }
 
     private struct StayMarkers: Identifiable {
@@ -667,7 +676,7 @@ private struct ReviewMap: View {
         }
         .mapStyle(.standard(emphasis: .muted))
         .accessibilityIdentifier("daily-route-map")
-        .onChange(of: Viewport(selection: selected?.id, endedAt: selected?.endedAt), initial: true) {
+        .onChange(of: Viewport(selection: selected?.id, endedAt: selected?.endedAt, request: focusRequest), initial: true) {
             position = selected.map(camera(for:)) ?? .automatic
         }
     }

@@ -20,8 +20,18 @@ struct LifeMemApp: App {
 
     init() {
         let names = RoutePlaceNames(file: Self.storageDirectory.appending(path: "place-names.json"))
+        var preferences = UserDefaults.standard
+        #if DEBUG && targetEnvironment(simulator)
+        if ReviewTestFixture.scenario != nil,
+           let isolated = UserDefaults(suiteName: "LifeMemUITests.\(Self.storageDirectory.lastPathComponent)") {
+            preferences = isolated
+        }
+        #endif
         _placeNames = State(initialValue: names)
-        _placeResolver = State(initialValue: PlaceResolver(file: Self.storageDirectory.appending(path: "place-suggestions.json")))
+        _placeResolver = State(initialValue: PlaceResolver(
+            file: Self.storageDirectory.appending(path: "place-suggestions.json"),
+            defaults: preferences
+        ))
         storage = Result {
             let schema = Schema([RecordedRoute.self, RoutePoint.self])
             var directory = Self.storageDirectory
