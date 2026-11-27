@@ -99,6 +99,7 @@ struct RouteChecks {
         try checkRankedPlaceNames()
         try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
+        try await checkMainlandPlaceLookup(in: root)
         await checkSharedPlaceCancellation(in: root)
         try await checkPlacePrefetch(in: root)
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
@@ -962,6 +963,65 @@ struct RouteChecks {
         let cancelledResult = await cancelled.value
         precondition(cancelledResult == nil && clearing.cached(near: uncached) == nil)
         precondition(furtherRequests == 0, "Revoked demand must not start a fallback network request.")
+    }
+
+    @MainActor
+    private static func checkMainlandPlaceLookup(in directory: URL) async throws {
+        let suite = "LifeMemTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let file = directory.appending(path: "mainland-place-suggestions.json")
+        let names = RoutePlaceNames(file: directory.appending(path: "mainland-place-names.json"))
+        let mainland = CLLocationCoordinate2D(latitude: 39.9, longitude: 116.3)
+        let nearbyMainland = CLLocationCoordinate2D(latitude: 39.9001, longitude: 116.3001)
+        let named = CLLocationCoordinate2D(latitude: 31.2304, longitude: 121.4737)
+        let abroad = CLLocationCoordinate2D(latitude: 35.6762, longitude: 139.6503)
+        let otherAbroad = CLLocationCoordinate2D(latitude: 35.6600, longitude: 139.6503)
+        let previousProjection = RouteMapProjection(coverageURL: nil)
+        let legacy = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero, projection: previousProjection) { coordinate, _ in
+            .init(.ranked(points: [], address: .init(street: coordinate.latitude == abroad.latitude ? "海外街道" : "偏移地址")))
+        }
+        for coordinate in [mainland, named, abroad] {
+            _ = await legacy.resolve(near: coordinate, automatic: false)
+        }
+        precondition(legacy.label(near: mainland, names: names) == "偏移地址附近")
+        try names.save("手动保存的地名", category: .home, for: named)
+
+        let projection = RouteMapProjection(coverageURL: URL(fileURLWithPath: "LifeMem/AMapMainlandCoverage.json"))
+        var queries: [CLLocationCoordinate2D] = []
+        let resolver = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero, projection: projection) { coordinate, _ in
+            queries.append(coordinate)
+            return .init(.ranked(points: [], address: .init(street: "合成街道")))
+        }
+        precondition(resolver.cached(near: mainland) == nil && resolver.cached(near: named) == nil)
+        precondition(resolver.label(near: named, names: names) == "手动保存的地名" && names.category(for: named) == .home)
+        precondition(resolver.label(near: abroad, names: names) == "海外街道附近")
+        await resolver.resolveAutomatically(near: mainland, names: names)
+        precondition(queries.isEmpty)
+
+        resolver.setAutomaticEnabled(true)
+        await resolver.resolveAutomatically(near: mainland, names: names)
+        await resolver.resolveAutomatically(near: named, names: names)
+        let manual = await resolver.resolve(near: nearbyMainland, automatic: false)
+        precondition(queries.count == 1 && manual?.displayName == "合成街道附近")
+        precondition(abs(queries[0].latitude - 39.90126009494757) < 1e-9)
+        precondition(abs(queries[0].longitude - 116.30607290385822) < 1e-9)
+        precondition(resolver.cached(near: queries[0]) == nil, "Cache must use the raw route coordinate.")
+
+        resolver.setAutomaticEnabled(false)
+        let explicitLookup = await resolver.resolve(near: named, automatic: false)
+        precondition(explicitLookup?.displayName == "合成街道附近" && queries.count == 2)
+        precondition(abs(queries[1].latitude - 31.22845773757727) < 1e-9)
+        precondition(abs(queries[1].longitude - 121.47822305927693) < 1e-9)
+        _ = await resolver.resolve(near: otherAbroad, automatic: false)
+        precondition(queries.count == 3 && queries[2].latitude == otherAbroad.latitude && queries[2].longitude == otherAbroad.longitude)
+        let reopened = PlaceResolver(file: file, defaults: defaults, projection: projection) { _, _ in
+            preconditionFailure("A refreshed cache should resolve without a lookup.")
+        }
+        let saved = await reopened.resolve(near: mainland, automatic: false)
+        precondition(saved?.displayName == "合成街道附近")
+        precondition(reopened.label(near: abroad, names: names) == "海外街道附近")
+        precondition(reopened.label(near: named, names: names) == "手动保存的地名")
     }
 
     @MainActor

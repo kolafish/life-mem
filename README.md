@@ -37,7 +37,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 
 轨迹数据库保存在 App 的本机目录，禁用自动云同步和云备份。地图回看由 Apple MapKit 提供。可在「回顾」右上角打开「管理记录」，向左滑动删除一条原始记录及其各日轨迹。暂停后也可以在「记录」页丢弃当前路线。重开 App 时，最近一条未结束记录会以暂停状态恢复。
 
-地图会自动将中国大陆的轨迹、停留点和地图聚焦位置对齐高德底图。新旧路线都在显示时从 WGS-84 换算为 GCJ-02，原始轨迹、里程和地点名称沿用本机存储。换算在设备上完成。覆盖范围取自公共领域数据 [Natural Earth 1:10m Admin 0 Map Units v5.1.2](https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_10m_admin_0_map_units.geojson) 中 `GU_A3` 为 `CHN` 的区域，经纬度保留五位小数。
+地图会自动将中国大陆的轨迹、停留点和地图聚焦位置对齐高德底图。显示地图和查找地名时，设备会将原始坐标从 WGS-84 换算为 GCJ-02。旧版在大陆使用原始坐标查到的自动地名会在下次查找时更新。原始轨迹、里程、手动地名和分类沿用本机存储。覆盖范围取自公共领域数据 [Natural Earth 1:10m Admin 0 Map Units v5.1.2](https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_10m_admin_0_map_units.geojson) 中 `GU_A3` 为 `CHN` 的区域，经纬度保留五位小数。
 
 ## 分析
 
