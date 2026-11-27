@@ -114,6 +114,11 @@ struct RouteChecks {
         precondition(runs[0][0].visitCoordinate?.longitude == 0)
         precondition(runs[0][0].points.first?.id == 0 && runs[0][0].points.last?.id == 16)
         precondition(runs[1][0].visitCoordinate == nil && runs[1][0].points.first?.id == 17)
+        let repeatedTime = LocationPoint(id: 18, timestamp: start,
+                                         coordinate: .init(latitude: 0, longitude: 0.005), accuracy: 5,
+                                         mode: .unknown, startsNewSegment: false, startsRecordingRun: false)
+        let duplicate = SegmentBuilder.group(sortedPoints: [points[0], repeatedTime], inferModes: true, trailingStayPoint: repeatedTime)
+        precondition(duplicate.count == 1 && duplicate[0].mode == .unknown && duplicate[0].distanceMeters == 0)
     }
 
     @MainActor
@@ -279,19 +284,21 @@ struct RouteChecks {
         let midnightReview = RouteReview(routes: [crossMidnight, overnightVisit], calendar: calendar)
         precondition(midnightReview.days.map(\.date) == [nextDay, day])
         precondition(midnightReview.places.map { $0.visits.count } == [1])
-        let afterMidnight = midnightReview.days[0].entries
-        let beforeMidnight = midnightReview.days[1].entries
-        precondition(afterMidnight.map(\.kind) == [.visit, .trip])
-        precondition(beforeMidnight.map(\.kind) == [.visit, .trip])
-        precondition(beforeMidnight[1].segments[0].coordinates.map(\.longitude) == [0.0, 0.0002])
-        precondition(afterMidnight[1].segments[0].coordinates.map(\.longitude) == [0.0004, 0.0006])
-        precondition(beforeMidnight[1].endpoints?.end.longitude == 0.0002)
-        precondition(afterMidnight[1].endpoints?.start.longitude == 0.0004)
-        precondition(afterMidnight[0].startedAt == nextDay)
-        precondition(beforeMidnight[0].endedAt == nextDay)
-        precondition(afterMidnight[0].stay?.visitID == beforeMidnight[0].stay?.visitID)
-        precondition((afterMidnight[0].stay?.duration ?? 0) + (beforeMidnight[0].stay?.duration ?? 0) == 480)
-        precondition(midnightReview.places[0].mostRecentVisit.id == beforeMidnight[0].id)
+        let before = midnightReview.days[1]
+        let after = midnightReview.days[0]
+        precondition(before.entries.count == 2 && after.entries.count == 2)
+        let beforeTrip = before.entries.first { $0.kind == .trip }!
+        let afterTrip = after.entries.first { $0.kind == .trip }!
+        let boundary = beforeTrip.segments[0].coordinates.last!.longitude
+        precondition(abs(boundary - 0.0003) < 1e-8)
+        precondition(beforeTrip.segments[0].coordinates.map(\.longitude) == [0.0, 0.0002, boundary])
+        precondition(afterTrip.segments[0].coordinates.map(\.longitude) == [boundary, 0.0004, 0.0006])
+        precondition(beforeTrip.endpoints?.end.longitude == boundary && afterTrip.endpoints?.start.longitude == boundary)
+        precondition(beforeTrip.endedAt == nextDay && afterTrip.startedAt == nextDay)
+        precondition(after.stays[0].startedAt == nextDay && before.stays[0].endedAt == nextDay)
+        precondition(after.stays[0].visitID == before.stays[0].visitID)
+        precondition(after.stays[0].duration + before.stays[0].duration == 480)
+        precondition(midnightReview.places[0].mostRecentVisit.id == before.stays[0].id)
 
         let bothDays = RouteAnalytics(review: midnightReview, range: day...nextDay, calendar: calendar, now: nextDay.addingTimeInterval(86_400)) { _ in .home }
         precondition(bothDays.days.map(\.date) == [day, nextDay])
@@ -310,6 +317,31 @@ struct RouteChecks {
         ])
         let midnightOnly = RouteReview(routes: [midnightEdge], calendar: calendar)
         precondition(midnightOnly.days.allSatisfy { $0.movingDuration == 10 && $0.movingDistanceMeters > 10 })
+        precondition(midnightOnly.days.allSatisfy { $0.moves.count == 1 && $0.moves[0].coordinates.count == 2 })
+        let wholeDistance = location(longitude: 0, at: day).distance(from: location(longitude: 0.0002, at: nextDay))
+        precondition(abs(midnightOnly.days.reduce(0) { $0 + $1.movingDistanceMeters } - wholeDistance) < 0.01)
+
+        let exactMidnight = insertRoute(context: context, start: nextDay.addingTimeInterval(-10), samples: [
+            (0, 0, .walking, true), (10, 0.0002, .walking, false), (20, 0.0004, .walking, false)
+        ])
+        let exactDays = RouteReview(routes: [exactMidnight], calendar: calendar).days
+        precondition(exactDays.allSatisfy { $0.moves.count == 1 && $0.moves[0].duration == 10 })
+        precondition(exactDays[1].moves[0].coordinates.last?.longitude == 0.0002)
+        precondition(exactDays[0].moves[0].coordinates.first?.longitude == 0.0002)
+
+        let gap = insertRoute(context: context, start: nextDay.addingTimeInterval(-60), samples: [
+            (0, 0, .walking, true), (120, 0.001, .walking, false)
+        ])
+        let gapDays = RouteReview(routes: [gap], calendar: calendar).days
+        precondition(gapDays.count == 2 && gapDays.allSatisfy { $0.moves.isEmpty })
+        precondition(gapDays[0].entries[0].followsGap)
+
+        let dateline = insertRoute(context: context, start: nextDay.addingTimeInterval(-10), samples: [
+            (0, 179.9998, .walking, true), (20, -179.9998, .walking, false)
+        ])
+        let datelineDays = RouteReview(routes: [dateline], calendar: calendar).days
+        precondition(datelineDays.allSatisfy { $0.moves.count == 1 })
+        precondition(abs(abs(datelineDays[0].moves[0].coordinates[0].longitude) - 180) < 1e-8)
 
         let longVisit = insertRoute(context: context, start: morning, samples: stride(from: 0, through: 1_200, by: 30).map {
             (Double($0), 0.05, .stationary, $0 == 0)
@@ -517,6 +549,12 @@ struct RouteChecks {
         )
         try context.save()
         let overnightReview = RouteReview(routes: repeatedOvernight + [midnightDeparture, midnightArrival], calendar: calendar)
+        let departureDays = RouteReview(routes: [midnightDeparture], calendar: calendar).days
+        precondition(departureDays.map(\.movingDuration) == [30, 10])
+        precondition(departureDays[0].moves[0].coordinates.first?.longitude == departureDays[1].moves[0].coordinates.last?.longitude)
+        let arrivalDays = RouteReview(routes: [midnightArrival], calendar: calendar).days
+        precondition(arrivalDays.map(\.movingDuration) == [10, 40])
+        precondition(arrivalDays[0].moves[0].coordinates.first?.longitude == arrivalDays[1].moves[0].coordinates.last?.longitude)
         let overnightEfficiency = RouteBehavior(review: overnightReview, range: firstDay...otherMidnight, calendar: calendar) { _ in nil }
         precondition(overnightEfficiency.patterns.count == 1)
         precondition(overnightEfficiency.patterns[0].samples.map(\.duration) == [100, 100])
