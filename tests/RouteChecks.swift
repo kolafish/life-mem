@@ -98,6 +98,7 @@ struct RouteChecks {
         try await checkSummaryIndex(context: context, directory: root)
         try await checkPlaceResolver(in: root)
         await checkSharedPlaceCancellation(in: root)
+        try await checkPlacePrefetch(in: root)
         print("Passed sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
@@ -932,6 +933,55 @@ struct RouteChecks {
             precondition(starts == (needsFallback ? [origin.longitude, nearby.longitude] : [origin.longitude]))
             precondition(fallbackStarts == (needsFallback ? [nearby.longitude] : []))
         }
+    }
+
+    @MainActor
+    private static func checkPlacePrefetch(in directory: URL) async throws {
+        let suite = "LifeMemTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let file = directory.appending(path: "prefetched-places.json")
+        let names = RoutePlaceNames(file: directory.appending(path: "prefetch-place-names.json"))
+        let now = Date.now
+        let visits = (0..<6).map { index in
+            RouteVisit(id: RecordedRoute(startedAt: now).persistentModelID, date: now, startedAt: now.addingTimeInterval(-500),
+                       endedAt: now, coordinate: .init(latitude: 0, longitude: Double(index) * 0.01))
+        }
+        try names.save("用户输入", for: visits[0].coordinate)
+        var starts = 0
+        var gate: CheckedContinuation<Void, Never>?
+        var pauses = false
+        let resolver = PlaceResolver(file: file, defaults: defaults, minimumInterval: .zero) { _, _ in
+            starts += 1
+            if pauses { await withCheckedContinuation { gate = $0 } }
+            return .init(MapPlaceSuggestion(pointOfInterestNames: ["合成地名"], streetOrArea: nil, district: nil, city: nil))
+        }
+        resolver.setAutomaticEnabled(true)
+        let legacy = PlaceResolver(file: file, defaults: defaults)
+        precondition(legacy.isAutomaticEnabled && !legacy.isPrefetchEnabled)
+        await resolver.prefetch(visits, names: names)
+        precondition(starts == 0 && !resolver.hasSeenAutomaticIntroduction)
+
+        resolver.dismissAutomaticIntroduction()
+        resolver.setAutomaticEnabled(true, includesPrefetch: true)
+        await resolver.prefetch(visits, names: names)
+        precondition(starts == 4 && resolver.cached(near: visits[0].coordinate) == nil)
+        await resolver.prefetch(visits, names: names)
+        precondition(starts == 5 && resolver.cached(near: visits[5].coordinate) != nil)
+        let reopened = PlaceResolver(file: file, defaults: defaults)
+        precondition(reopened.isPrefetchEnabled && reopened.hasSeenAutomaticIntroduction)
+
+        try resolver.clearCache()
+        pauses = true
+        let pending = Task { await resolver.prefetch(visits, names: names) }
+        while gate == nil { await Task.yield() }
+        try resolver.clearCache()
+        gate?.resume()
+        await pending.value
+        precondition(starts == 6 && resolver.cached(near: visits[1].coordinate) == nil)
+        resolver.setAutomaticEnabled(false)
+        await resolver.prefetch(visits, names: names)
+        precondition(starts == 6)
     }
 
     private typealias Sample = (seconds: TimeInterval, longitude: Double, mode: TravelMode, newSegment: Bool)

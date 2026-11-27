@@ -65,6 +65,20 @@ final class RouteReviewCache {
         }
     }
 
+    func visits(
+        for routes: [RecordedRoute],
+        revision: RouteReviewRevision,
+        indexed: [RouteReviewRevision.RouteVersion: RouteSummaryRecord]
+    ) -> [RouteVisit] {
+        selectCalendar(revision.calendar)
+        return zip(routes, revision.routes).flatMap { route, version in
+            if let indexed = indexed[version] { return indexed.visits }
+            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar)
+            contributions[version] = contribution
+            return contribution.visits
+        }
+    }
+
     private func selectCalendar(_ calendar: Calendar) {
         if contributionCalendar != calendar {
             contributions.removeAll()

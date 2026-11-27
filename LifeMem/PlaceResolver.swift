@@ -25,8 +25,14 @@ struct MapPlaceSuggestion: Codable {
 @Observable
 final class PlaceResolver {
     private static let automaticPreference = "automaticPlaceLookup"
+    private static let prefetchPreference = "prefetchPlaceNames"
+    private static let introductionPreference = "dismissedAutomaticPlaceIntroduction"
     private static let searchRadius: CLLocationDistance = 50
     private static let cacheRadius: CLLocationDistance = 25
+
+    private enum AutomaticMode {
+        case off, review, prefetch
+    }
 
     typealias DemandCheck = @MainActor () throws -> Void
     typealias Lookup = @MainActor (CLLocationCoordinate2D, DemandCheck) async throws -> LookupResponse
@@ -92,7 +98,12 @@ final class PlaceResolver {
     @ObservationIgnored private var nextStart: ContinuousClock.Instant?
     @ObservationIgnored private var retryAfter: ContinuousClock.Instant?
     @ObservationIgnored private var backoff: Duration = .zero
-    private(set) var isAutomaticEnabled: Bool
+    @ObservationIgnored private var prefetchedVisits: Set<RouteVisit.ID> = []
+    private var automaticMode: AutomaticMode
+    private(set) var hasSeenAutomaticIntroduction: Bool
+
+    var isAutomaticEnabled: Bool { automaticMode != .off }
+    var isPrefetchEnabled: Bool { automaticMode == .prefetch }
 
     init(
         file: URL,
@@ -106,17 +117,30 @@ final class PlaceResolver {
         self.minimumInterval = minimumInterval
         self.initialBackoff = initialBackoff
         self.lookup = lookup ?? Self.systemLookup
-        isAutomaticEnabled = defaults.bool(forKey: Self.automaticPreference)
+        if defaults.bool(forKey: Self.automaticPreference) {
+            automaticMode = defaults.bool(forKey: Self.prefetchPreference) ? .prefetch : .review
+        } else {
+            automaticMode = .off
+        }
+        hasSeenAutomaticIntroduction = defaults.bool(forKey: Self.introductionPreference)
         let data = try? Data(contentsOf: file)
         entries = data.flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
     }
 
-    func setAutomaticEnabled(_ enabled: Bool) {
-        guard enabled != isAutomaticEnabled else { return }
-        isAutomaticEnabled = enabled
+    func dismissAutomaticIntroduction() {
+        hasSeenAutomaticIntroduction = true
+        defaults.set(true, forKey: Self.introductionPreference)
+    }
+
+    func setAutomaticEnabled(_ enabled: Bool, includesPrefetch: Bool = false) {
+        let mode: AutomaticMode = enabled ? (includesPrefetch ? .prefetch : .review) : .off
+        guard automaticMode != mode else { return }
+        automaticMode = mode
         defaults.set(enabled, forKey: Self.automaticPreference)
+        defaults.set(mode == .prefetch, forKey: Self.prefetchPreference)
         automaticRevision = UUID()
-        if !enabled, let demands = active?.demands {
+        prefetchedVisits.removeAll()
+        if let demands = active?.demands {
             active?.demands = demands.filter { $0.value.automaticRevision == nil }
             cancelWithoutDemand()
         }
@@ -126,6 +150,7 @@ final class PlaceResolver {
         try Data("[]".utf8).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         entries = []
         cacheRevision = UUID()
+        prefetchedVisits.removeAll()
         active?.demands.removeAll()
         cancelWithoutDemand()
     }
@@ -144,6 +169,32 @@ final class PlaceResolver {
 
     func resolveAutomatically(near coordinate: CLLocationCoordinate2D, names: RoutePlaceNames) async {
         _ = await resolve(near: coordinate, automatic: true, names: names)
+    }
+
+    func resolveAutomatically(near coordinates: [CLLocationCoordinate2D], names: RoutePlaceNames) async {
+        let cache = cacheRevision
+        let permission = automaticRevision
+        for coordinate in coordinates {
+            guard !Task.isCancelled, cache == cacheRevision, permission == automaticRevision else { return }
+            await resolveAutomatically(near: coordinate, names: names)
+        }
+    }
+
+    func prefetch(_ visits: [RouteVisit], names: RoutePlaceNames) async {
+        let cache = cacheRevision
+        let permission = automaticRevision
+        var remaining = 4
+        for visit in visits {
+            guard isPrefetchEnabled, names.loadIssue == nil, remaining > 0, !Task.isCancelled,
+                  cache == cacheRevision, permission == automaticRevision else { return }
+            if let retryAfter, clock.now < retryAfter { return }
+            guard !prefetchedVisits.contains(visit.id), label(near: visit.coordinate, names: names) == nil else { continue }
+            await resolveAutomatically(near: visit.coordinate, names: names)
+            guard !Task.isCancelled, cache == cacheRevision, permission == automaticRevision else { return }
+            if let retryAfter, clock.now < retryAfter { return }
+            prefetchedVisits.insert(visit.id)
+            remaining -= 1
+        }
     }
 
     func resolve(near coordinate: CLLocationCoordinate2D, automatic: Bool, names: RoutePlaceNames? = nil) async -> MapPlaceSuggestion? {

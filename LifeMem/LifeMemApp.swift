@@ -28,9 +28,18 @@ struct LifeMemApp: App {
         }
         #endif
         _placeNames = State(initialValue: names)
+        let lookup: PlaceResolver.Lookup?
+        #if DEBUG && targetEnvironment(simulator)
+        lookup = ReviewTestFixture.scenario == "prefetch" ? { _, _ in
+            .init(MapPlaceSuggestion(pointOfInterestNames: ["测试街市"], streetOrArea: nil, district: nil, city: nil))
+        } : nil
+        #else
+        lookup = nil
+        #endif
         _placeResolver = State(initialValue: PlaceResolver(
             file: Self.storageDirectory.appending(path: "place-suggestions.json"),
-            defaults: preferences
+            defaults: preferences,
+            lookup: lookup
         ))
         storage = Result {
             #if DEBUG && targetEnvironment(simulator)
@@ -74,6 +83,9 @@ private struct RootView: View {
     }
 
     @Environment(\.calendar) private var calendar
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(RoutePlaceNames.self) private var placeNames
+    @Environment(PlaceResolver.self) private var placeResolver
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
     @State private var recorder: RouteRecorder
@@ -92,6 +104,8 @@ private struct RootView: View {
 
     var body: some View {
         let request = selection == .record ? nil : Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
+        let prefetchRoutes = recentFinishedRoutesForPrefetch
+        let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
             NavigationStack {
                 RecordView(recorder: recorder)
@@ -127,6 +141,19 @@ private struct RootView: View {
             }
             await index.save(records, for: request.revision, after: .seconds(1))
         }
+        .task(id: prefetch) {
+            guard let prefetch else { return }
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            let indexed = await index.records(for: prefetch)
+            guard !Task.isCancelled, prefetchRoutes.allSatisfy({ !$0.isDeleted }) else { return }
+            let now = Date.now
+            let oldest = prefetch.calendar.date(byAdding: .day, value: -7, to: now) ?? now
+            let visits = reviewCache.visits(for: prefetchRoutes, revision: prefetch, indexed: indexed)
+                .filter { (oldest...now).contains($0.endedAt) }
+                .sorted { $0.endedAt > $1.endedAt }
+            await placeResolver.prefetch(visits, names: placeNames)
+        }
         .alert("Life Mem", isPresented: Binding(
             get: { recorder.notice != nil },
             set: { if !$0 { recorder.notice = nil } }
@@ -135,6 +162,12 @@ private struct RootView: View {
         } message: {
             Text(recorder.notice ?? "")
         }
+    }
+
+    private var recentFinishedRoutesForPrefetch: [RecordedRoute] {
+        guard placeResolver.isPrefetchEnabled, placeNames.loadIssue == nil, scenePhase == .active,
+              !recorder.isDeletingRoute, recorder.state == .idle || recorder.state == .paused else { return [] }
+        return Array(routes.lazy.filter(\.isFinished).prefix(8))
     }
 }
 
@@ -145,7 +178,7 @@ private enum ReviewTestFixture {
 
     @MainActor
     static func seed(context: ModelContext, names: RoutePlaceNames, directory: URL) throws {
-        if scenario == "suggestions" {
+        if scenario == "suggestions" || scenario == "prefetch" {
             try seedSuggestions(context: context)
             return
         }
