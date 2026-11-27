@@ -58,18 +58,20 @@ final class TripProbe: NSObject, @preconcurrency CLLocationManagerDelegate {
         var lastDepartureToFix: Int?
     }
 
-    struct ResumeTrial: Codable {
-        var beganAt: Date
-        var lastTransition: Date?
-        var waitingForMovement = false
-        var pauses = 0
-        var resumes = 0
-        var lastMarkedDelay: Int?
+    private(set) var resumeTrial: ResumeTrial? {
+        didSet {
+            // The trace store checkpoints each fix. Preferences retain the summary between trials.
+            if oldValue?.beganAt != resumeTrial?.beganAt || oldValue?.pauses != resumeTrial?.pauses
+                || oldValue?.resumes != resumeTrial?.resumes {
+                persistResumeSummary()
+            }
+        }
     }
 
-    private(set) var resumeTrial: ResumeTrial? {
-        didSet { defaults.set(try? resumeTrial.map { try JSONEncoder().encode($0) }, forKey: "resumeTrial") }
+    private func persistResumeSummary() {
+        defaults.set(try? resumeTrial.map { try JSONEncoder().encode($0) }, forKey: "resumeTrial")
     }
+
     private var liveTask: Task<Void, Never>?
     private var backgroundSession: CLBackgroundActivitySession?
     private(set) var testingResume = false
@@ -170,47 +172,41 @@ final class TripProbe: NSObject, @preconcurrency CLLocationManagerDelegate {
         testingResume = true
         phase = .listening
         backgroundSession = CLBackgroundActivitySession()
+        guard let trial = resumeTrial else { return }
         liveTask = Task {
             do {
+                let directory = URL.applicationSupportDirectory.appending(path: "ResumeTrace", directoryHint: .isDirectory)
+                let trace = try await ResumeTrace.open(directory: directory, trial: trial)
+                let checkpoint = await trace.checkpoint
+                try Task.checkCancellation()
+                resumeTrial = checkpoint
                 for try await update in CLLocationUpdate.liveUpdates() {
-                    guard !Task.isCancelled, testingResume else { return }
-                    observeResume(stationary: update.isStationary, fix: update.location)
+                    try Task.checkCancellation()
+                    guard let fix = update.location else { continue }
+                    let mark = markedDeparture
+                    let next = try await trace.record(fix, stationary: update.isStationary, receivedAt: .now,
+                        markedAt: mark, markWindow: Self.departureMeasurementWindow)
+                    try Task.checkCancellation()
+                    if let next {
+                        if next.resumes > (resumeTrial?.resumes ?? 0), markedDeparture == mark {
+                            markedDeparture = nil
+                        }
+                        resumeTrial = next
+                    }
                 }
+                try Task.checkCancellation()
+                stop()
+                error = "定位更新已结束，可重新开启测试。"
             } catch {
-                guard !Task.isCancelled, testingResume else { return }
+                guard !Task.isCancelled else { return }
+                stop()
+                self.error = "定位或轨迹保存失败。已保存的点仍在本机，请检查定位权限和剩余空间，再重新开启测试。"
             }
-            guard !Task.isCancelled, testingResume else { return }
-            stop()
-            error = "定位更新已结束，可重新开启测试。"
         }
-    }
-
-    private func observeResume(stationary: Bool, fix: CLLocation?) {
-        guard var trial = resumeTrial, let fix, fix.timestamp >= trial.beganAt,
-              fix.timestamp <= Date.now, fix.timestamp > (trial.lastTransition ?? .distantPast),
-              fix.horizontalAccuracy >= 0 else { return }
-        if stationary && !trial.waitingForMovement {
-            trial.waitingForMovement = true
-            trial.pauses += 1
-        } else if !stationary && trial.waitingForMovement {
-            trial.waitingForMovement = false
-            trial.resumes += 1
-            trial.lastMarkedDelay = nil
-            if let mark = markedDeparture {
-                let delay = Date.now.timeIntervalSince(mark)
-                if fix.timestamp >= mark, (0..<Self.departureMeasurementWindow).contains(delay) {
-                    trial.lastMarkedDelay = Int(delay)
-                }
-                markedDeparture = nil
-            }
-        } else {
-            return
-        }
-        trial.lastTransition = fix.timestamp
-        resumeTrial = trial
     }
 
     func stop() {
+        if testingResume { persistResumeSummary() }
         liveTask?.cancel()
         liveTask = nil
         backgroundSession?.invalidate()
@@ -442,7 +438,7 @@ private struct TripProbeView: View {
                     }
                     if let error = probe.error { Text(error).foregroundStyle(.secondary) }
                 } footer: {
-                    Text("只在您开启监听后采样。坐标仅用于内存判断，统计保存在本机。")
+                    Text("静止恢复测试会在本机保存轨迹、自动暂停和恢复时间。可随时停止监听。")
                 }
                 Section {
                     NavigationLink("定位对照") { LocationComparisonView() }
@@ -454,6 +450,7 @@ private struct TripProbeView: View {
                     Section("静止恢复测试") {
                         counter("自动暂停", trial.pauses)
                         counter("移动后恢复", trial.resumes)
+                        counter("本轮已保存轨迹点", trial.savedPoints ?? 0)
                         if let delay = trial.lastMarkedDelay { counter("标记出发到恢复（秒）", delay) }
                     }
                 }
