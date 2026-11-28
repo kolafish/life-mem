@@ -163,13 +163,16 @@ final class ReviewUITests: XCTestCase {
             XCTAssertTrue(deny.exists)
             deny.tap()
         }
-        let save = app.buttons["保存"]
-        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: save)
-        waitForExpectations(timeout: 5)
+        let message = app.staticTexts["note-dictation-message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 6))
+        XCTAssertTrue(message.label.contains("离线") || message.label.contains("未获授权") || message.label.contains("无法使用麦克风"), message.label)
         XCTAssertTrue(input.waitForExistence(timeout: 4))
         XCTAssertEqual(input.value as? String, "River")
+        input.tap()
+        input.typeText(" walk")
+        XCTAssertEqual(input.value as? String, "River walk")
         app.buttons["保存"].tap()
-        XCTAssertTrue(note.label.contains("River"))
+        XCTAssertTrue(note.label.contains("River walk"))
     }
     #endif
 

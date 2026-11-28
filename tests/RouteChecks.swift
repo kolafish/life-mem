@@ -6,6 +6,7 @@ import SwiftData
 struct RouteChecks {
     @MainActor
     static func main() async throws {
+        checkNoteTranscripts()
         checkWeeklyVisits()
         try checkVisitCandidates()
         try checkAutomaticTrips()
@@ -241,6 +242,21 @@ struct RouteChecks {
         try context.save()
         let overnight = RouteReviewCache().day(routes: [late, early], containing: midnight, calendar: .current).days[0]
         precondition(overnight.entries.count == 2 && overnight.memoryKey(forPhotoAt: midnight.addingTimeInterval(8), coordinate: near) == nil)
+    }
+
+    private static func checkNoteTranscripts() {
+        var speech = NoteTranscript()
+        precondition(speech.update("到了公元", range: nil, settled: false) == "到了公元")
+        precondition(speech.update("到了公园。", range: 0.3..<2.1, settled: true) == "到了公园。")
+        precondition(speech.update("看见白", range: nil, settled: false) == "到了公园。看见白")
+        precondition(speech.update("看见白鹭。", range: 4.0..<5.8, settled: true) == "到了公园。看见白鹭。")
+        precondition(speech.update("看见白鹭！", range: 4.05..<5.9, settled: true) == "到了公园。看见白鹭！")
+        precondition(speech.update("到了公园。看见白鹭！", range: 0.3..<5.9, settled: true) == "到了公园。看见白鹭！")
+        precondition(speech.update("到了公园。看见白鹭！", range: nil, settled: false) == "到了公园。看见白鹭！")
+        precondition(NoteTranscript.join("午后", "散步") == "午后散步" && NoteTranscript.join("River", "walk") == "River walk")
+        var repeated = NoteTranscript()
+        precondition(repeated.update("好", range: 0..<1, settled: true) == "好")
+        precondition(repeated.update("好", range: 3..<4, settled: true) == "好好")
     }
 
     private static func checkMapProjection() {

@@ -110,6 +110,7 @@ private struct EntryNoteEditor: View {
                     .onChange(of: text) { _, value in persist(value, operation: .draft) }
                 if let message = dictation.message {
                     Text(message).font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("note-dictation-message")
                 }
                 Button {
                     if dictation.phase == .idle {
@@ -118,9 +119,7 @@ private struct EntryNoteEditor: View {
                             await dictation.start { words in
                                 let original = prefix ?? text
                                 prefix = original
-                                let needsSpace = original.last.map { $0.isASCII && ($0.isLetter || $0.isNumber) } == true
-                                    && words.first.map { $0.isASCII && ($0.isLetter || $0.isNumber) } == true
-                                text = original + (needsSpace ? " " : "") + words
+                                text = NoteTranscript.join(original, words)
                             }
                         }
                     } else { dictation.stop() }
