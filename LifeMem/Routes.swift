@@ -145,6 +145,10 @@ struct RouteReview {
         journeys = contributions.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
     }
 
+    static func summaryRecord(for route: RecordedRoute, calendar: Calendar) -> RouteSummaryRecord {
+        contribution(for: route, calendar: calendar).summary
+    }
+
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
         var contribution = Contribution()
         let points = route.points

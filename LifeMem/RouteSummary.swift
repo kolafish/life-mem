@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 struct DailySummary: Codable, Sendable {
     let date: Date
@@ -45,12 +46,14 @@ struct RouteSummaryRecord: Codable, Sendable {
 struct RouteSummary: Sendable {
     let id = UUID()
     let days: [DailySummary]
+    let recall: VisitRecallIndex
     let places: [RoutePlace]
     let journeys: [RouteJourney]
 
     init(review: RouteReview) {
         days = review.days.map(DailySummary.init(day:))
         places = review.places
+        recall = VisitRecallIndex(places: places)
         journeys = review.journeys
     }
 
@@ -62,6 +65,7 @@ struct RouteSummary: Sendable {
         let byDate = Dictionary(grouping: records.flatMap(\.days) + extra, by: \.date)
         days = byDate.keys.sorted(by: >).map { DailySummary(date: $0, combining: byDate[$0, default: []]) }
         places = RoutePlace.group(records.flatMap(\.visits) + confirmed, within: RouteReview.placeRadius)
+        recall = VisitRecallIndex(places: places)
         let edges = ConfirmedVisitEdges(visits: confirmed)
         journeys = records.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
     }
@@ -139,5 +143,40 @@ actor RouteSummaryIndex {
         let data = try JSONEncoder().encode(updated)
         try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         index = updated
+    }
+}
+
+actor ArchiveSummaryReader {
+    private var pendingSave: Task<Void, Never>?
+    private var lastCalendar: Calendar?
+    private var records: [RouteReviewRevision.RouteVersion: RouteSummaryRecord] = [:]
+
+    func load(_ revision: RouteReviewRevision, container: ModelContainer, index: RouteSummaryIndex) async throws -> RouteSummary? {
+        pendingSave?.cancel()
+        let disk = await index.records(for: revision)
+        try Task.checkCancellation()
+        let context = ModelContext(container)
+        if lastCalendar != revision.calendar { records = [:] }
+        lastCalendar = revision.calendar
+        var updated = [RouteReviewRevision.RouteVersion: RouteSummaryRecord]()
+        for version in revision.routes {
+            try Task.checkCancellation()
+            if let cached = records[version] ?? disk[version] {
+                updated[version] = cached
+                continue
+            }
+            let id = version.id
+            var query = FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == id })
+            query.fetchLimit = 1
+            guard let route = try context.fetch(query).first, route.pointCount == version.pointCount,
+                  route.visitRevision == version.visitRevision, route.endedAtRest == version.endedAtRest else { return nil }
+            updated[version] = RouteReview.summaryRecord(for: route, calendar: revision.calendar)
+        }
+        try Task.checkCancellation()
+        records = updated
+        let summary = RouteSummary(records: revision.routes.compactMap { updated[$0] }, calendar: revision.calendar)
+        try Task.checkCancellation()
+        pendingSave = Task { [updated] in await index.save(updated, for: revision, after: .seconds(1)) }
+        return summary
     }
 }

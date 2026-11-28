@@ -40,6 +40,56 @@ final class ReviewUITests: XCTestCase {
         #endif
     }
 
+    func testSearchPlaceAndRecallVisit() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons["地点"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("测试办公室")
+        let office = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
+        XCTAssertTrue(office.waitForExistence(timeout: 5))
+        office.tap()
+        XCTAssertTrue(app.staticTexts["到访记录"].waitForExistence(timeout: 5))
+    }
+
+    func testPreviousVisitOpensSourceFromToday() {
+        let app = launch(fixture: "day")
+        let office = app.buttons.matching(identifier: "today-stop")
+            .matching(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
+        scrollTo(office, in: app)
+        office.tap()
+        let last = app.buttons.matching(identifier: "visit-memory").matching(NSPredicate(format: "label CONTAINS %@", "上次")).firstMatch
+        XCTAssertTrue(revealTimelineControl(last, in: app), app.debugDescription)
+        last.tap()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))!
+        let id = "memory-source-\(Int(yesterday.timeIntervalSince1970))"
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: id).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let selected = app.buttons.matching(identifier: "timeline-entry").matching(NSPredicate(format: "isSelected == true")).firstMatch
+        XCTAssertTrue(selected.label.contains("测试办公室"))
+    }
+
+    func testFirstVisitOpensSourceFromDailyReview() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["回顾"].tap()
+        let yesterdayRow = app.buttons.matching(identifier: "review-day").element(boundBy: 1)
+        XCTAssertTrue(yesterdayRow.waitForExistence(timeout: 5))
+        yesterdayRow.tap()
+        let office = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试办公室", "→")).firstMatch
+        XCTAssertTrue(revealTimelineControl(office, in: app), app.debugDescription)
+        office.tap()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))!
+        let source = app.descendants(matching: .any).matching(identifier: "memory-source-\(Int(yesterday.timeIntervalSince1970))").firstMatch
+        XCTAssertFalse(source.exists)
+        let first = app.buttons.matching(identifier: "visit-memory").matching(NSPredicate(format: "label CONTAINS %@", "首次")).firstMatch
+        XCTAssertTrue(revealTimelineControl(first, in: app), app.debugDescription)
+        first.tap()
+        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(office.isSelected)
+    }
+
     func testTodayShowsStopsAndOpensSelectedEntry() {
         let app = launch(fixture: "day")
         let title = app.staticTexts["today-title"]
@@ -47,6 +97,8 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(title.label.contains("测试办公室"))
         app.buttons.matching(identifier: "today-entry").firstMatch.tap()
         XCTAssertTrue(app.buttons["显示全天"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
     }
 
     func testDailyMapAndTimelineSelection() {
@@ -73,11 +125,10 @@ final class ReviewUITests: XCTestCase {
         XCTAssertFalse(reset.exists)
 
         let home = app.buttons.matching(identifier: "timeline-entry")
-            .matching(NSPredicate(format: "label CONTAINS %@", "测试之家")).firstMatch
-        for _ in 0..<4 where !home.isHittable { app.swipeDown() }
-        XCTAssertTrue(home.isHittable)
+            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试之家", "→")).firstMatch
+        XCTAssertTrue(revealTimelineControl(home, in: app), app.debugDescription)
         home.tap()
-        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     func testEmptyHistory() {
@@ -185,7 +236,16 @@ final class ReviewUITests: XCTestCase {
         let discard = app.buttons["丢弃这次记录"]
         scrollTo(discard, in: app)
         discard.tap()
-        app.buttons["取消"].tap()
+        let confirmDiscard = app.buttons["丢弃记录"]
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 5))
+        let cancel = app.buttons["取消"]
+        if cancel.exists {
+            cancel.tap()
+        } else {
+            // Some iPhone versions present this as a popover that dismisses on an outside tap.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.15)).tap()
+        }
+        XCTAssertTrue(confirmDiscard.waitForNonExistence(timeout: 5))
         XCTAssertTrue(paused.exists)
         discard.tap()
         app.buttons["丢弃记录"].tap()
@@ -264,6 +324,23 @@ final class ReviewUITests: XCTestCase {
         let restored = app.buttons.matching(identifier: "timeline-entry")
             .matching(NSPredicate(format: "label CONTAINS %@", "Restored")).firstMatch
         XCTAssertTrue(restored.waitForExistence(timeout: 5))
+    }
+
+    private func revealTimelineControl(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        let map = app.descendants(matching: .any).matching(identifier: "daily-route-map").firstMatch
+        let tabs = app.tabBars.firstMatch
+        for _ in 0..<10 {
+            let frame = element.exists ? element.frame : .zero
+            let mapBottom = map.exists ? map.frame.maxY + 12 : 0
+            let tabTop = tabs.exists ? tabs.frame.minY : app.frame.maxY
+            if element.isHittable && frame.midY > mapBottom && frame.midY < tabTop { return true }
+            // Drag along the margin to scroll the timeline outside the interactive map.
+            let aboveMap = !frame.isEmpty && frame.midY <= mapBottom
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: aboveMap ? 0.62 : 0.77))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: aboveMap ? 0.77 : 0.62))
+            start.press(forDuration: 0.15, thenDragTo: end)
+        }
+        return false
     }
 
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication, horizontalOffset: Double = 0.5) {

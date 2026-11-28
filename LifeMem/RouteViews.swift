@@ -10,6 +10,7 @@ struct RouteHistoryView: View {
     @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
+    @State private var placeSearch = ""
     @State private var mode = BrowseMode.timeline
     @State private var showsArchive = false
     @State private var confirmsAutomaticLookup = false
@@ -130,8 +131,19 @@ struct RouteHistoryView: View {
             ContentUnavailableView("暂无停留地点", systemImage: "mappin.circle", description: Text("记录到持续停留后，可以在这里回看历次到访。"))
         } else {
             let suggestions = PlaceSuggestions.candidates(in: review.places, calendar: calendar, category: placeNames.category(for:))
+            let query = placeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matches = review.places.filter { place in
+                if query.isEmpty { return true }
+                let labels: [String?] = place.visitName.map { [$0] } ?? [
+                    placeNames.name(for: place.coordinate),
+                    placeResolver.label(near: place.coordinate, names: placeNames),
+                    placeResolver.cached(near: place.coordinate)?.displayName
+                ]
+                return labels.compactMap { $0 }.contains { $0.localizedStandardContains(query) }
+            }
             List {
-                if !suggestions.isEmpty {
+                if matches.isEmpty { ContentUnavailableView.search(text: query) }
+                if query.isEmpty, !suggestions.isEmpty {
                     Section("常用地点建议") {
                         ForEach(suggestions) { item in
                             NavigationLink {
@@ -148,7 +160,7 @@ struct RouteHistoryView: View {
                     }
                 }
                 Section {
-                    ForEach(review.places) { place in
+                    ForEach(matches) { place in
                         let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
                         let visitCount = "\(place.visits.count) 次到访"
                         let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
@@ -168,6 +180,7 @@ struct RouteHistoryView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .searchable(text: $placeSearch, prompt: "搜索地点名称或别名")
         }
     }
 
@@ -287,6 +300,71 @@ private struct RoutePlaceReviewView: View {
     }
 }
 
+private struct VisitRecallKey: EnvironmentKey {
+    static let defaultValue = VisitRecallIndex()
+}
+
+extension EnvironmentValues {
+    var visitRecall: VisitRecallIndex {
+        get { self[VisitRecallKey.self] }
+        set { self[VisitRecallKey.self] = newValue }
+    }
+}
+
+struct RecordedVisitDestination: View {
+    let visit: RouteVisit
+    @Environment(\.calendar) private var calendar
+    @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
+    private var routes: [RecordedRoute]
+    @State private var cache = RouteReviewCache()
+    @State private var day: RouteReviewDay?
+    @State private var loaded = false
+
+    var body: some View {
+        let date = calendar.startOfDay(for: visit.startedAt)
+        let end = calendar.dateInterval(of: .day, for: date)?.end ?? date
+        let future = routes.prefix { $0.startedAt >= end }
+        let earlier = routes.dropFirst(future.count)
+        let sameDay = earlier.prefix { $0.startedAt >= date }
+        let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
+        Group {
+            if let day, let entry = day.entries.first(where: { $0.stay?.visitID == visit.id }) {
+                RouteDayReviewView(day: day, focus: entry.id, allowsAutomaticLookup: false).environment(\.currentRouteReview, nil)
+                    .accessibilityIdentifier("memory-source-\(Int(date.timeIntervalSince1970))")
+            } else if loaded {
+                ContentUnavailableView("这次到访已更新", systemImage: "calendar")
+            } else { ProgressView() }
+        }
+        .task(id: RouteReviewRevision(calendar: calendar, routes: Array(subset))) {
+            day = cache.review(routes: Array(subset), calendar: calendar).days.first { $0.date == date }
+            loaded = true
+        }
+    }
+}
+
+struct VisitMemoryLink: View {
+    let stay: StayEvent
+    @Environment(\.visitRecall) private var recall
+    @Environment(\.calendar) private var calendar
+
+    var body: some View {
+        if stay.isCandidate != true, let memory = recall[stay.visitID] {
+            NavigationLink {
+                RecordedVisitDestination(visit: memory.previous ?? memory.visit)
+            } label: {
+                if let previous = memory.previous {
+                    let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: previous.startedAt),
+                                                       to: calendar.startOfDay(for: memory.visit.startedAt)).day ?? 0
+                    let when = previous.startedAt.formatted(.dateTime.month().day().hour().minute())
+                    Text(days > 0 ? "上次记录在 \(days) 天前 · \(when)" : "同日上次到访 · \(when)")
+                } else { Text("首次记录到这里") }
+            }
+            .font(.footnote)
+            .accessibilityIdentifier("visit-memory")
+        }
+    }
+}
+
 private struct CurrentReviewKey: EnvironmentKey {
     static let defaultValue: RouteReview? = nil
 }
@@ -385,6 +463,7 @@ struct RouteDayReviewView: View {
                 if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }
             }
         }
+        .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)

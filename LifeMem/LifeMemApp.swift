@@ -102,6 +102,8 @@ private struct RootView: View {
     let recorder: RouteRecorder
     @State private var selection = Tab.record
     @State private var today = Date.now
+    @Environment(\.modelContext) private var modelContext
+    @State private var historyReader = ArchiveSummaryReader()
     @State private var todayCache = RouteReviewCache()
     @State private var todayReview: RouteReview?
     @State private var review: RouteReview?
@@ -114,7 +116,7 @@ private struct RootView: View {
         let midnight = calendar.startOfDay(for: today)
         let recent = Array(routes.prefix { $0.startedAt >= midnight })
         let todayRoutes = recent + Array(routes.dropFirst(recent.count).prefix(1))
-        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: selection == .record ? todayRoutes : routes))
+        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
         let prefetchRoutes = recentFinishedRoutesForPrefetch
         let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
@@ -136,6 +138,7 @@ private struct RootView: View {
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
         }
+        .environment(\.visitRecall, summary?.recall ?? VisitRecallIndex())
         .environment(\.currentRouteReview, selection == .record ? todayReview : review)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in today = .now }
         .onChange(of: scenePhase) { if scenePhase == .active { today = .now } }
@@ -144,20 +147,16 @@ private struct RootView: View {
             guard !Task.isCancelled else { return }
             if request.tab == .record {
                 todayReview = todayCache.review(routes: todayRoutes, calendar: request.revision.calendar)
-                return
             }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)
             }
-            let indexed = await index.records(for: request.revision)
-            guard !Task.isCancelled,
-                  request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
-            let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
-            if summaryRevision != request.revision {
-                summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] }, calendar: request.revision.calendar)
+            guard summaryRevision != request.revision else { return }
+            if let result = try? await historyReader.load(request.revision, container: modelContext.container, index: index),
+               !Task.isCancelled, request.revision == RouteReviewRevision(calendar: calendar, routes: routes) {
+                summary = result
                 summaryRevision = request.revision
             }
-            await index.save(records, for: request.revision, after: .seconds(1))
         }
         .task(id: prefetch) {
             guard let prefetch else { return }

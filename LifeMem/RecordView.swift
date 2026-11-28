@@ -8,6 +8,7 @@ struct RecordView: View {
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.openURL) private var openURL
+    @State private var focusedEntry: FocusedEntry?
     @State private var routeToDiscard: RecordedRoute?
     @State private var discardFailed = false
 
@@ -32,6 +33,11 @@ struct RecordView: View {
         case .recording: "location.circle.fill"
         case .paused: "pause.circle.fill"
         }
+    }
+
+    private struct FocusedEntry: Identifiable {
+        let day: RouteReviewDay
+        let id: RouteReviewEntry.ID
     }
 
     var body: some View {
@@ -82,14 +88,17 @@ struct RecordView: View {
                 if let day {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(day.entries) { entry in
-                            NavigationLink {
-                                RouteDayReviewView(day: day, focus: entry.id)
+                            Button {
+                                focusedEntry = FocusedEntry(day: day, id: entry.id)
                             } label: {
                                 let name = day.title(for: entry) { resolver.label(near: $0, names: names) }
                                 ReviewTextRow(title: name, detail: nil, time: clockRange(entry.startedAt, entry.endedAt))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .accessibilityIdentifier("today-entry")
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .accessibilityIdentifier(entry.stay == nil ? "today-entry" : "today-stop")
+                            if let stay = entry.stay { VisitMemoryLink(stay: stay) }
                         }
                     }
                 } else if loading {
@@ -125,6 +134,16 @@ struct RecordView: View {
             .padding(20)
         }
         .navigationTitle("今天")
+        .sheet(item: $focusedEntry) { entry in
+            NavigationStack {
+                RouteDayReviewView(day: entry.day, focus: entry.id)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { focusedEntry = nil }
+                        }
+                    }
+            }
+        }
         .confirmationDialog("丢弃这次记录？", isPresented: Binding(
             get: { routeToDiscard != nil },
             set: { if !$0 { routeToDiscard = nil } }

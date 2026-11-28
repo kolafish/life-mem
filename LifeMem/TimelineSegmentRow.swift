@@ -62,6 +62,7 @@ struct TimelineSegmentRow: View {
                     .padding(.vertical, 6)
                 }
                 if let stay = entry.stay {
+                    VisitMemoryLink(stay: stay)
                     HStack {
                         if stay.isCandidate == true {
                             Button("确认到访") { save(stay, name: nil) }
