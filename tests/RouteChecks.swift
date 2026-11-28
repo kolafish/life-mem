@@ -6,6 +6,7 @@ import SwiftData
 struct RouteChecks {
     @MainActor
     static func main() async throws {
+        try checkAutomaticTrips()
         checkMapProjection()
         let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3_600)
         let first = location(longitude: 0, at: start)
@@ -1189,6 +1190,49 @@ struct RouteChecks {
         precondition(estimate.observe(sample(150, 0.1), currentMode: .stationary) == nil)
         precondition(estimate.observe(sample(151, 1.2), currentMode: .stationary) == nil)
         precondition(estimate.observe(sample(152, 1.2), currentMode: .stationary) == .walking)
+    }
+
+    @MainActor
+    private static func checkAutomaticTrips() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: config)
+        let context = container.mainContext
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        var trips = AutomaticTrips(context: context)
+        func send(_ seconds: Int, _ longitude: Double, paused: Bool = false, accuracy: Double = 5) throws {
+            let time = start.addingTimeInterval(Double(seconds))
+            try trips.receive(location(longitude: longitude, at: time, accuracy: accuracy),
+                              stationary: paused, receivedAt: time)
+        }
+        try send(0, 0)
+        try send(8, 0.00002)
+        try send(9, 0.002, accuracy: 90)
+        precondition(trips.route == nil)
+        try send(30, 0.00035)
+        let first = trips.route!
+        precondition(first.pointCount == 2 && first.startedAt == start && first.distanceMeters > 25)
+        try send(50, 0.0004, paused: true)
+        precondition(first.isFinished && first.automaticPauseAt != nil)
+        trips = AutomaticTrips(context: context)
+        try trips.restore(now: start.addingTimeInterval(60))
+        try send(90, 0.0004)
+        try send(110, 0.0008)
+        precondition(trips.route?.id == first.id && !first.isFinished && first.pointCount == 5)
+        try send(100, 0.0015, paused: true)
+        precondition(!first.isFinished)
+        try send(120, 0.0008, paused: true)
+        try send(720, 0.0008)
+        try send(750, 0.0012)
+        let second = trips.route!
+        precondition(first.isFinished && second.id != first.id && second.pointCount == 2)
+        trips = AutomaticTrips(context: context)
+        try trips.restore(now: start.addingTimeInterval(755))
+        try send(780, 0.0016)
+        precondition(trips.route?.id == second.id && second.pointCount == 3)
+        for t in stride(from: 810, through: 1320, by: 30) { try send(t, 0.0016) }
+        precondition(second.isFinished && trips.route == nil)
+        let saved = try context.fetch(FetchDescriptor<RecordedRoute>())
+        precondition(saved.count == 2 && !RouteReview(routes: saved, calendar: .current).days.isEmpty)
     }
 
     private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {

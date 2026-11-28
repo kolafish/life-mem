@@ -8,7 +8,12 @@ struct RecordView: View {
     @State private var discardFailed = false
 
     private var status: String {
-        switch recorder.state {
+        if recorder.automaticEnabled {
+            if recorder.automaticNeedsSettings { return "等待定位授权" }
+            if recorder.automaticTrips.route?.isFinished == false { return "正在自动记录" }
+            return "等待出发"
+        }
+        return switch recorder.state {
         case .idle: "可以开始记录"
         case .requestingPermission: "等待定位权限"
         case .recording: "正在记录"
@@ -39,7 +44,7 @@ struct RecordView: View {
                     Text(statusDetail)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let route = recorder.activeRoute {
+                    if let route = recorder.activeRoute ?? recorder.automaticTrips.route, !route.isFinished {
                         ViewThatFits(in: .horizontal) {
                             HStack(spacing: 24) { metrics(for: route) }
                             VStack(alignment: .leading, spacing: 12) { metrics(for: route) }
@@ -52,13 +57,15 @@ struct RecordView: View {
                 .background(.indigo.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
 
                 VStack(spacing: 10) {
-                    Button(action: primaryAction) {
-                        Label(primaryTitle, systemImage: primarySymbol)
-                            .frame(maxWidth: .infinity, minHeight: 36)
+                    if !recorder.automaticEnabled {
+                        Button(action: primaryAction) {
+                            Label(primaryTitle, systemImage: primarySymbol)
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(recorder.state == .requestingPermission || (recorder.isDeletingRoute && recorder.state != .recording))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(recorder.state == .requestingPermission || (recorder.isDeletingRoute && recorder.state != .recording))
 
                     if recorder.state == .paused, let route = recorder.activeRoute {
                         if route.pointCount > 0 {
@@ -79,9 +86,21 @@ struct RecordView: View {
                     }
                 }
 
-                if recorder.needsPreciseLocation && recorder.state == .recording {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("自动记录（试用）", isOn: Binding(
+                        get: { recorder.automaticEnabled }, set: { recorder.setAutomatic($0) }
+                    ))
+                    .disabled(recorder.state != .idle || recorder.isDeletingRoute)
+                    Text(recorder.state == .idle
+                         ? "允许始终定位后，出发和到达会自动记录到回顾。"
+                         : "结束当前手动记录后可以开启。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                if recorder.automaticNeedsSettings || (recorder.needsPreciseLocation && (recorder.state == .recording || recorder.automaticEnabled)) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("开启精确位置后才能绘制详细路线。")
+                        Text(recorder.automaticNeedsSettings ? "请在定位设置中选择「始终」。" : "开启精确位置后才能绘制详细路线。")
                             .font(.subheadline)
                         Button("打开系统设置") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
@@ -116,7 +135,13 @@ struct RecordView: View {
     }
 
     private var statusDetail: String {
-        switch recorder.state {
+        if recorder.automaticEnabled {
+            if recorder.automaticNeedsSettings { return "授权后将自动开始监听。" }
+            if recorder.locationUnavailable { return "正在等待可用的定位信号。" }
+            if recorder.automaticTrips.route?.isFinished == false { return "路线正在保存到这台 iPhone 上。" }
+            return "可以锁屏。检测到移动后会保存路线。"
+        }
+        return switch recorder.state {
         case .idle: "开始后可以锁屏。路线保存在这台 iPhone 上。"
         case .requestingPermission: "允许使用期间访问位置后，记录会自动开始。"
         case .recording:

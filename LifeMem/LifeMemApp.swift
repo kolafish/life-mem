@@ -14,7 +14,13 @@ struct LifeMemApp: App {
         return URL.applicationSupportDirectory.appending(path: "LifeMem", directoryHint: .isDirectory)
     }()
 
-    private let storage: Result<ModelContainer, Error>
+    private struct AppStorage {
+        let container: ModelContainer
+        let recorder: RouteRecorder
+        let index: RouteSummaryIndex
+    }
+
+    private let storage: Result<AppStorage, Error>
     @State private var placeNames: RoutePlaceNames
     @State private var placeResolver: PlaceResolver
 
@@ -52,16 +58,18 @@ struct LifeMemApp: App {
             #if DEBUG && targetEnvironment(simulator)
             if shouldSeed { try ReviewTestFixture.seed(context: container.mainContext, names: names, directory: Self.storageDirectory) }
             #endif
-            return container
+            let index = RouteSummaryIndex(file: Self.storageDirectory.appending(path: "daily-summary.json"))
+            let recorder = RouteRecorder(context: container.mainContext, summaryIndex: index, preferences: preferences)
+            return AppStorage(container: container, recorder: recorder, index: index)
         }
     }
 
     var body: some Scene {
         WindowGroup {
             switch storage {
-            case let .success(container):
-                RootView(context: container.mainContext, summaryFile: Self.storageDirectory.appending(path: "daily-summary.json"))
-                    .modelContainer(container)
+            case let .success(store):
+                RootView(recorder: store.recorder, index: store.index)
+                    .modelContainer(store.container)
                     .environment(placeNames)
                     .environment(placeResolver)
             case .failure:
@@ -91,19 +99,13 @@ private struct RootView: View {
     @Environment(PlaceResolver.self) private var placeResolver
     @Query(filter: #Predicate<RecordedRoute> { $0.pointCount > 0 }, sort: \RecordedRoute.startedAt, order: .reverse)
     private var routes: [RecordedRoute]
-    @State private var recorder: RouteRecorder
+    let recorder: RouteRecorder
     @State private var selection = Tab.record
     @State private var review: RouteReview?
     @State private var reviewCache = RouteReviewCache()
     @State private var summary: RouteSummary?
     @State private var summaryRevision: RouteReviewRevision?
-    @State private var index: RouteSummaryIndex
-
-    init(context: ModelContext, summaryFile: URL) {
-        let index = RouteSummaryIndex(file: summaryFile)
-        _index = State(initialValue: index)
-        _recorder = State(initialValue: RouteRecorder(context: context, summaryIndex: index))
-    }
+    let index: RouteSummaryIndex
 
     var body: some View {
         let request = selection == .record ? nil : Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))

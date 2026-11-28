@@ -1,8 +1,40 @@
+import CoreLocation
 import XCTest
 
 final class ReviewUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
+    }
+
+    func testAutomaticRecordingSwitchAndRestore() {
+        let app = launch(fixture: "empty")
+        let toggle = app.switches["自动记录（试用）"]
+        scrollTo(toggle, in: app)
+        XCTAssertTrue(toggle.isEnabled)
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["等待出发"].waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertFalse(app.buttons["开始记录"].exists)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["等待出发"].waitForExistence(timeout: 8))
+        #if targetEnvironment(simulator)
+        defer { XCUIDevice.shared.location = nil }
+        let recording = app.staticTexts["正在自动记录"]
+        for step in 0..<8 {
+            let fix = CLLocation(coordinate: .init(latitude: 0, longitude: Double(step) * 0.00015),
+                                 altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: .now)
+            XCUIDevice.shared.location = XCUILocation(location: fix)
+            if recording.waitForExistence(timeout: 2) { break }
+        }
+        XCTAssertTrue(recording.exists, app.debugDescription)
+        #endif
+        scrollTo(toggle, in: app)
+        toggle.tap()
+        XCTAssertTrue(app.buttons["开始记录"].waitForExistence(timeout: 5))
+        #if targetEnvironment(simulator)
+        app.tabBars.buttons["回顾"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "review-day").firstMatch.waitForExistence(timeout: 8))
+        #endif
     }
 
     func testDailyMapAndTimelineSelection() {
