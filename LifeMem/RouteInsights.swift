@@ -126,3 +126,101 @@ struct RouteInsights: Sendable {
         return home / analytics.trackedDuration
     }
 }
+
+struct WeeklyVisits: Sendable {
+    struct Week: Identifiable, Sendable {
+        let start: Date
+        let visits: [RouteVisit] // The first arrival on each distinct local day.
+        var id: Date { start }
+    }
+
+    struct Place: Identifiable, Sendable {
+        let place: RoutePlace
+        let ordinal: Int
+        let current: Week
+        let history: [Week]
+        var id: RoutePlace.ID { place.id }
+
+        var usualDays: Double? {
+            guard history.count == 4 else { return nil }
+            let counts = history.map { $0.visits.count }.sorted()
+            return Double(counts[1] + counts[2]) / 2
+        }
+    }
+
+    let places: [Place]
+
+    init(summary: RouteSummary, calendar: Calendar, now: Date) {
+        guard let week = calendar.dateInterval(of: .weekOfYear, for: now), week.start < now else {
+            places = []
+            return
+        }
+        let wallTime: Set<Calendar.Component> = [.hour, .minute, .second]
+        let windows = (0...4).compactMap { offset -> DateInterval? in
+            guard let end = calendar.date(byAdding: .weekOfYear, value: -offset, to: now),
+                  calendar.dateComponents(wallTime, from: end) == calendar.dateComponents(wallTime, from: now),
+                  let start = calendar.dateInterval(of: .weekOfYear, for: end)?.start, start < end else { return nil }
+            return DateInterval(start: start, end: end)
+        }
+        guard let current = windows.first else { places = []; return }
+        let days = Dictionary(uniqueKeysWithValues: summary.days.map { ($0.date, $0) })
+        func dailyCoverage(_ window: DateInterval) -> [[DateInterval]] {
+            var result: [[DateInterval]] = []
+            var day = window.start
+            while day < window.end, let next = calendar.dateInterval(of: .day, for: day)?.end {
+                let interval = DateInterval(start: day, end: min(next, window.end))
+                result.append(RouteAnalytics.observedIntervals(days[day], during: interval))
+                day = next
+            }
+            return result
+        }
+        let observed = dailyCoverage(current)
+        let comparable = windows.count == 5 && windows.dropFirst().enumerated().allSatisfy { index, window in
+            let history = dailyCoverage(window)
+            guard history.count == observed.count else { return false }
+            return zip(observed, history).allSatisfy { a, b in
+                let longest = max(a.reduce(0) { $0 + $1.duration }, b.reduce(0) { $0 + $1.duration })
+                let historical = b.compactMap { span -> DateInterval? in
+                    guard let begin = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.start),
+                          let end = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.end), begin < end,
+                          calendar.dateComponents(wallTime, from: begin) == calendar.dateComponents(wallTime, from: span.start),
+                          calendar.dateComponents(wallTime, from: end) == calendar.dateComponents(wallTime, from: span.end),
+                          abs(end.timeIntervalSince(begin) - span.duration) < 1
+                    else { return nil }
+                    return DateInterval(start: begin, end: end)
+                }
+                guard historical.count == b.count,
+                      zip(historical, historical.dropFirst()).allSatisfy({ $0.end <= $1.start })
+                else { return false }
+                var overlap = 0.0, i = 0, j = 0
+                while i < a.count && j < historical.count {
+                    let left = a[i], right = historical[j]
+                    overlap += max(0, min(left.end, right.end).timeIntervalSince(max(left.start, right.start)))
+                    if left.end <= right.end { i += 1 } else { j += 1 }
+                }
+                return overlap >= 15 * 60 && overlap >= longest / 2
+            }
+        }
+        func slice(_ place: RoutePlace, in interval: DateInterval) -> Week {
+            var seen = Set<Date>()
+            let visits = place.visits.filter { visit in
+                visit.startedAt >= interval.start && visit.startedAt < interval.end &&
+                    seen.insert(calendar.startOfDay(for: visit.startedAt)).inserted
+            }
+            return Week(start: interval.start, visits: visits)
+        }
+        places = summary.places.enumerated().compactMap { index, place -> Place? in
+            let recent = slice(place, in: current)
+            let previous = comparable ? windows.dropFirst().map { slice(place, in: $0) } : []
+            let item = Place(place: place, ordinal: index + 1, current: recent, history: previous)
+            guard !recent.visits.isEmpty || (item.usualDays ?? 0) > 0 else { return nil }
+            return item
+        }.sorted {
+            let lhs = Double($0.current.visits.count), rhs = Double($1.current.visits.count)
+            let changeA = abs(lhs - ($0.usualDays ?? lhs)), changeB = abs(rhs - ($1.usualDays ?? rhs))
+            if changeA != changeB { return changeA > changeB }
+            if lhs != rhs { return lhs > rhs }
+            return $0.place.mostRecentVisit.startedAt > $1.place.mostRecentVisit.startedAt
+        }
+    }
+}

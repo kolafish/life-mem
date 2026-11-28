@@ -48,6 +48,7 @@ struct RouteAnalysisReport: Sendable {
     let insights: RouteInsights?
     let placesByVisits: [RouteAnalytics.PlaceRank]
     let placesByDuration: [RouteAnalytics.PlaceRank]
+    let weekly: WeeklyVisits?
     let placeNumbers: [RouteVisit.ID: Int]
 }
 
@@ -108,6 +109,8 @@ actor RouteAnalysisWorker {
         let result = RouteAnalysisReport(
             scope: scope, analytics: data, behavior: behavior, insights: insights,
             placesByVisits: data.topPlaces(by: .visits), placesByDuration: data.topPlaces(by: .duration),
+            weekly: scope.calendar.dateInterval(of: .weekOfYear, for: request.now)?.start == scope.range.lowerBound
+                ? WeeklyVisits(summary: summary, calendar: scope.calendar, now: request.now) : nil,
             placeNumbers: Dictionary(uniqueKeysWithValues: data.places.enumerated().map { ($0.element.id, $0.offset + 1) })
         )
         previous = (request, result)
@@ -225,6 +228,19 @@ struct RouteAnalytics: Sendable {
         let time: Date
         let observation: Int
         let starts: Bool
+    }
+
+    static func observedIntervals(_ day: DailySummary?, during interval: DateInterval) -> [DateInterval] {
+        guard let day else { return [] }
+        let intervals = day.movement + day.stays.map { DateInterval(start: $0.startedAt, end: $0.endedAt) }
+        let clipped = intervals.compactMap { clip($0, to: interval) }.sorted { $0.start < $1.start }
+        var merged: [DateInterval] = []
+        for span in clipped {
+            if let last = merged.last, span.start <= last.end {
+                merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, span.end))
+            } else { merged.append(span) }
+        }
+        return merged
     }
 
     private static func coverage(_ summary: DailySummary?, during elapsed: DateInterval,
