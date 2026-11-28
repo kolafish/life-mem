@@ -24,6 +24,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let preferences: UserDefaults
     private(set) var automaticEnabled: Bool
     private(set) var automaticNeedsSettings = false
+    private var automaticStreamID = UUID()
     private var automaticTask: Task<Void, Never>?
     private var backgroundSession: CLBackgroundActivitySession?
 
@@ -99,6 +100,19 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
             automaticFailure()
             return
         }
+        let streamID = UUID()
+        automaticStreamID = streamID
+        if CMMotionActivityManager.isActivityAvailable(), CMMotionActivityManager.authorizationStatus() == .authorized {
+            motionManager.startActivityUpdates(to: .main) { [weak self] activity in
+                guard let activity else { return }
+                MainActor.assumeIsolated {
+                    guard let self, self.automaticEnabled, self.automaticStreamID == streamID,
+                          activity.startDate >= (self.automaticTrips.motionActivity?.since ?? .distantPast) else { return }
+                    let mode = activity.confidence == .low ? TravelMode.unknown : Self.detectedMode(for: activity)
+                    self.automaticTrips.motionActivity = (mode, activity.startDate)
+                }
+            }
+        }
         // On a background relaunch the first fix may predate this process.
         backgroundSession = CLBackgroundActivitySession()
         automaticTask = Task {
@@ -124,6 +138,9 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     }
 
     private func cancelAutomaticStream() {
+        automaticStreamID = UUID()
+        motionManager.stopActivityUpdates()
+        automaticTrips.motionActivity = nil
         automaticTask?.cancel()
         automaticTask = nil
         backgroundSession?.invalidate()
@@ -361,20 +378,16 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         motionManager.stopActivityUpdates()
     }
 
-    private func updateMotionActivity(_ activity: CMMotionActivity) {
+    private static func detectedMode(for activity: CMMotionActivity) -> TravelMode {
         // Core Motion can report both automotive and stationary at a traffic light.
-        let detected: TravelMode
-        if activity.automotive {
-            detected = .automotive
-        } else if activity.walking || activity.running {
-            detected = .walking
-        } else if activity.cycling {
-            detected = .cycling
-        } else if activity.stationary {
-            detected = .stationary
-        } else {
-            detected = .unknown
-        }
+        if activity.automotive { return .automotive }
+        if activity.walking || activity.running { return .walking }
+        if activity.cycling { return .cycling }
+        return activity.stationary ? .stationary : .unknown
+    }
+
+    private func updateMotionActivity(_ activity: CMMotionActivity) {
+        let detected = Self.detectedMode(for: activity)
         guard detected != sensorMode else { return }
         sensorMode = detected
         speedEstimate = SpeedModeEstimate()

@@ -16,6 +16,13 @@ struct RouteReviewEntry: Identifiable {
         var start: CLLocationCoordinate2D { origin.coordinate }
         var end: CLLocationCoordinate2D { destination.coordinate }
 
+        func continuing(to next: Self) -> Self {
+            var joined = Self(start: start, end: next.end)
+            joined.startName = startName
+            joined.endName = next.endName
+            return joined
+        }
+
         init(start: CLLocationCoordinate2D, end: CLLocationCoordinate2D) {
             origin = StoredCoordinate(start)
             destination = StoredCoordinate(end)

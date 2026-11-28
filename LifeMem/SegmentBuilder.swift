@@ -60,7 +60,7 @@ enum SegmentBuilder {
         _ points: [LocationPoint<ID>], automatic: Bool = false, namedVisitStarts: Set<ID> = []
     ) -> [[Slice<ID>]] {
         cleanRuns(points.sorted { $0.timestamp < $1.timestamp }, automatic: automatic).map {
-            timelineSlices($0, namedVisitStarts: namedVisitStarts)
+            timelineSlices($0, automatic: automatic, namedVisitStarts: namedVisitStarts)
         }
     }
 
@@ -214,10 +214,9 @@ enum SegmentBuilder {
     }
 
     private static func timelineSlices<ID: Hashable>(
-        _ run: [LocationPoint<ID>], namedVisitStarts: Set<ID>
+        _ run: [LocationPoint<ID>], automatic: Bool, namedVisitStarts: Set<ID>
     ) -> [Slice<ID>] {
-        var slices: [Slice<ID>] = []
-        var movementStart = run.startIndex
+        var candidates: [(Range<Int>, CLLocationCoordinate2D)] = []
         var next = run.startIndex
         while next < run.endIndex {
             let start = next
@@ -230,11 +229,25 @@ enum SegmentBuilder {
             }
             let window = run[start..<next]
             guard run[next - 1].timestamp.timeIntervalSince(run[start].timestamp) >= minimumVisitDuration else { continue }
-            for (range, center) in observedStays(in: window, preserveNamedStart: namedVisitStarts.contains(run[start].id)) {
-                if movementStart < range.lowerBound { slices.append(.move(run[movementStart..<range.lowerBound])) }
-                slices.append(.stay(run[range], center: center))
-                movementStart = range.upperBound
+            candidates += observedStays(in: window, preserveNamedStart: namedVisitStarts.contains(run[start].id))
+        }
+
+        var slices: [Slice<ID>] = []
+        var movementStart = run.startIndex
+        for (i, candidate) in candidates.enumerated() {
+            let (range, center) = candidate
+            if automatic, range != run.indices, !namedVisitStarts.contains(run[range.lowerBound].id) {
+                // Inspect only the travel immediately adjacent to this stop. Evidence
+                // from another possible visit must not be borrowed across its dwell.
+                let before = i == 0 ? run.startIndex : candidates[i - 1].0.upperBound
+                let after = i + 1 == candidates.count ? run.endIndex : candidates[i + 1].0.lowerBound
+                let arriving = ArrivalMotion.adjacent(in: run[before..<range.lowerBound].reversed(), from: run[range.lowerBound])
+                let leaving = ArrivalMotion.adjacent(in: run[range.upperBound..<after], from: run[range.upperBound - 1])
+                guard arriving.supportsVisit || leaving.supportsVisit else { continue }
             }
+            if movementStart < range.lowerBound { slices.append(.move(run[movementStart..<range.lowerBound])) }
+            slices.append(.stay(run[range], center: center))
+            movementStart = range.upperBound
         }
         if movementStart < run.endIndex { slices.append(.move(run[movementStart...])) }
         return slices

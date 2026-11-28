@@ -194,3 +194,56 @@ enum RouteStep {
         return false
     }
 }
+
+/// The last supported way of travelling into a stop. Short bursts at walking
+/// speed are common in a queue, so require displacement beyond the GPS error.
+struct ArrivalMotion {
+    private(set) var mode: TravelMode = .unknown
+    private var walkStart: CLLocation?
+    private var lastWalk: Date?
+
+    mutating func observe(_ mode: TravelMode, at fix: CLLocation) {
+        switch mode {
+        case .walking, .cycling:
+            if let start = walkStart, let lastWalk,
+               abs(fix.timestamp.timeIntervalSince(lastWalk)) <= LocationSampling.maximumGap {
+                if abs(fix.timestamp.timeIntervalSince(start.timestamp)) >= 15,
+                   fix.distance(from: start) >= max(25, fix.horizontalAccuracy + start.horizontalAccuracy) {
+                    self.mode = mode
+                }
+            } else {
+                walkStart = fix
+            }
+            lastWalk = fix.timestamp
+        case .unknown, .stationary, .automotive:
+            walkStart = nil
+            lastWalk = nil
+            if mode == .automotive { self.mode = mode }
+        }
+    }
+
+    var supportsVisit: Bool { mode == .walking || mode == .cycling }
+
+    /// Scan outward from a stop, in either time direction. A signal gap
+    /// cannot supply evidence about the approach on the other side.
+    static func adjacent<S: Sequence, ID>(in points: S, from edge: LocationPoint<ID>) -> Self
+    where S.Element == LocationPoint<ID> {
+        var evidence = Self()
+        var previous = edge
+        for point in points {
+            let later = point.timestamp > previous.timestamp ? point : previous
+            let earlier = point.timestamp > previous.timestamp ? previous : point
+            if point.timestamp != previous.timestamp, !later.continuesObservation(after: earlier) { break }
+            evidence.observe(point.mode, at: point.fix)
+            if evidence.mode != .unknown { break }
+            previous = point
+        }
+        return evidence
+    }
+}
+
+extension LocationPoint {
+    var fix: CLLocation {
+        CLLocation(coordinate: coordinate, altitude: 0, horizontalAccuracy: accuracy, verticalAccuracy: -1, timestamp: timestamp)
+    }
+}

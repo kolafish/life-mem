@@ -70,13 +70,15 @@ struct RouteSummary: Sendable {
         places = RoutePlace.group(resolved.placeVisits(records.flatMap(\.visits)), within: RouteReview.placeRadius)
         recall = VisitRecallIndex(places: places)
         let edges = ConfirmedVisitEdges(visits: confirmed)
-        journeys = records.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
+        journeys = resolved.journeys(records.flatMap { item in
+            item.journeys.map { (item.boundary?.routeID, edges.applying(to: $0, boundary: item.boundary)) }
+        })
     }
 }
 
 actor RouteSummaryIndex {
     // Increment when the stored fields or the segmentation and projection rules change.
-    private static let version = 4
+    private static let version = 5
 
     private struct Index: Codable {
         let version: Int
