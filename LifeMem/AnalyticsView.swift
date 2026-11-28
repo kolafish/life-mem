@@ -307,7 +307,7 @@ struct AnalyticsView: View {
             .frame(minHeight: 44)
             ForEach(top) { item in
                 let coordinate = item.place.coordinate
-                let title = resolver.label(near: coordinate, names: names) ?? "停留地点 \(report.placeNumbers[item.id, default: 1])"
+                let title = item.place.visitName ?? resolver.label(near: coordinate, names: names) ?? "停留地点 \(report.placeNumbers[item.id, default: 1])"
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title).font(.subheadline.weight(.medium))
                     GeometryReader { geometry in

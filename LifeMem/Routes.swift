@@ -6,6 +6,7 @@ struct RouteReviewRevision: Hashable, Sendable {
     struct RouteVersion: Hashable, Codable, Sendable {
         let id: UUID
         let pointCount: Int
+        var visitRevision: UUID?
         var endedAtRest: Bool?
     }
 
@@ -20,7 +21,7 @@ struct RouteReviewRevision: Hashable, Sendable {
         resolved.firstWeekday = calendar.firstWeekday
         resolved.minimumDaysInFirstWeek = calendar.minimumDaysInFirstWeek
         self.calendar = resolved
-        self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount, endedAtRest: $0.endedAtRest) }
+        self.routes = routes.map { RouteVersion(id: $0.id, pointCount: $0.pointCount, visitRevision: $0.visitRevision, endedAtRest: $0.endedAtRest) }
     }
 }
 
@@ -105,7 +106,7 @@ struct RouteReview {
             let days = entriesByDay.map { date, entries in
                 DailySummary(day: RouteReviewDay(date: date, entries: entries))
             }
-            return RouteSummaryRecord(days: days, visits: visits, journeys: journeys)
+            return RouteSummaryRecord(days: days, visits: visits, journeys: journeys, boundary: boundary)
         }
     }
 
@@ -120,14 +121,10 @@ struct RouteReview {
                 entriesByDay[date, default: []].append(contentsOf: entries)
             }
         }
-        for visit in AutomaticVisitBoundary.candidates(in: contributions.compactMap(\.boundary)) {
-            var day = calendar.startOfDay(for: visit.startedAt)
-            while day < visit.endedAt, let end = calendar.dateInterval(of: .day, for: day)?.end {
-                var stay = StayEvent(id: visit.id, visitID: visit.id, coordinate: visit.coordinate,
-                                     startedAt: max(day, visit.startedAt), endedAt: min(end, visit.endedAt))
-                stay.isCandidate = true
+        let inferred = AutomaticVisitBoundary.candidates(in: contributions.compactMap(\.boundary), calendar: calendar)
+        for visit in inferred {
+            for (day, stay) in visit.dailyInferredStays(calendar: calendar) {
                 entriesByDay[day, default: []].append(.init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay))
-                day = end
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -136,13 +133,17 @@ struct RouteReview {
                 entries: entriesByDay[date, default: []].sorted { $0.startedAt < $1.startedAt }
             )
         }
-        places = RoutePlace.group(contributions.flatMap(\.visits), within: Self.placeRadius)
+        places = RoutePlace.group(contributions.flatMap(\.visits) + inferred.filter(\.isConfirmed), within: Self.placeRadius)
         journeys = contributions.flatMap(\.journeys)
     }
 
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
         var contribution = Contribution()
-        let runs = SegmentBuilder.build(route.points.map(\.locationPoint))
+        let points = route.points
+        let edits = Dictionary(uniqueKeysWithValues: points.compactMap { point in
+            point.visitName.map { (point.persistentModelID, $0) }
+        })
+        let runs = SegmentBuilder.build(points.map(\.locationPoint))
         if route.isAutomatic == true, let session = route.automaticSessionStart,
            let first = runs.first?.first, let last = runs.last?.last,
            let start = first.points.first, let end = last.points.last {
@@ -151,7 +152,7 @@ struct RouteReview {
                 session: session, start: start.timestamp, end: end.timestamp,
                 origin: StoredCoordinate(start.coordinate), destination: StoredCoordinate(end.coordinate),
                 startsWithVisit: first.visitCoordinate != nil, endsWithVisit: last.visitCoordinate != nil,
-                endedAtRest: route.endedAtRest == true)
+                endedAtRest: route.endedAtRest == true, decision: route.arrivalDecision, name: route.arrivalName)
         }
         for (index, slices) in runs.enumerated() {
             for (sliceIndex, slice) in slices.enumerated() {
@@ -164,13 +165,16 @@ struct RouteReview {
                 let previousCoordinate = previousSlice?.visitCoordinate
                 let nextCoordinate = nextSlice?.visitCoordinate
                 if let visit = slice.visitCoordinate {
-                    contribution.visits.append(RouteVisit(id: first.id, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit))
+                    var observation = RouteVisit(id: first.id, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit)
+                    observation.visitName = edits[first.id]
+                    contribution.visits.append(observation)
                     let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
                     for (day, points) in pointsByDay {
                         let segments = SegmentBuilder.group(sortedPoints: points)
                         let dayEnd = calendar.dateInterval(of: .day, for: day)?.end ?? last.timestamp
-                        let stay = StayEvent(id: segments[0].id, visitID: first.id, coordinate: visit,
+                        var stay = StayEvent(id: segments[0].id, visitID: first.id, coordinate: visit,
                                              startedAt: max(day, first.timestamp), endedAt: min(dayEnd, last.timestamp))
+                        stay.visitName = observation.visitName
                         contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
                             kind: .visit, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                             segments: segments, endpoints: nil, stay: stay
@@ -256,18 +260,43 @@ struct AutomaticVisitBoundary: Codable, Sendable {
     let endsWithVisit: Bool
     let endedAtRest: Bool
 
-    static func candidates(in boundaries: [Self]) -> [RouteVisit] {
+    var decision: String?
+    var name: String?
+
+    static func candidates(in boundaries: [Self], calendar: Calendar) -> [RouteVisit] {
         let sources = Dictionary(uniqueKeysWithValues: boundaries.map { ($0.routeID, $0) })
         return boundaries.compactMap { departure in
-            guard let previous = departure.previous, let arrival = sources[previous],
+            guard departure.decision != "ignored", let previous = departure.previous, let arrival = sources[previous],
                   arrival.endedAtRest, arrival.session == departure.session,
                   !arrival.endsWithVisit, !departure.startsWithVisit,
                   departure.start.timeIntervalSince(arrival.end) >= 8 * 60,
                   departure.start.timeIntervalSince(arrival.end) <= 24 * 3600,
                   arrival.destination.coordinate.location.distance(from: departure.origin.coordinate.location) <= RouteReview.placeRadius
             else { return nil }
-            return RouteVisit(id: departure.id, date: arrival.end, startedAt: arrival.end,
-                              endedAt: departure.start, coordinate: arrival.destination.coordinate)
+            var visit = RouteVisit(id: departure.id, date: calendar.startOfDay(for: arrival.end), startedAt: arrival.end,
+                                   endedAt: departure.start, coordinate: arrival.destination.coordinate)
+            visit.isConfirmed = departure.decision == "confirmed"
+            visit.visitName = departure.name
+            visit.sourceArrivalID = previous
+            return visit
         }
+    }
+}
+
+extension RouteVisit {
+    func dailyInferredStays(calendar: Calendar) -> [(Date, StayEvent)] {
+        var result: [(Date, StayEvent)] = []
+        var day = calendar.startOfDay(for: startedAt)
+        while day < endedAt, let end = calendar.dateInterval(of: .day, for: day)?.end {
+            var stay = StayEvent(id: id, visitID: id, coordinate: coordinate,
+                                 startedAt: max(day, startedAt), endedAt: min(end, endedAt))
+            stay.isInferred = true
+            stay.isCandidate = !isConfirmed
+            stay.sourceArrivalID = sourceArrivalID
+            stay.visitName = visitName
+            result.append((day, stay))
+            day = end
+        }
+        return result
     }
 }

@@ -41,7 +41,7 @@ enum PlaceSuggestions {
             }.sorted { $0.observedDays > $1.observedDays }
             guard let first = ranked.first, first.observedDays >= minimumDays,
                   ranked.dropFirst().first?.observedDays != first.observedDays,
-                  category(first.place.coordinate) == nil,
+                  first.place.visitName == nil, category(first.place.coordinate) == nil,
                   !suggestions.contains(where: { $0.place.id == first.place.id }) else { continue }
             suggestions.append(first)
         }

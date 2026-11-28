@@ -149,7 +149,7 @@ struct RouteHistoryView: View {
                 }
                 Section {
                     ForEach(review.places) { place in
-                        let name = placeResolver.label(near: place.coordinate, names: placeNames)
+                        let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
                         let visitCount = "\(place.visits.count) 次到访"
                         let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
                         NavigationLink {
@@ -238,7 +238,7 @@ private struct RoutePlaceReviewView: View {
 
     var body: some View {
         let canLookUp = scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
-        let name = placeResolver.label(near: place.coordinate, names: placeNames)
+        let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
         let mapCoordinate = RouteMapProjection.standard.coordinate(for: place.coordinate)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
@@ -298,8 +298,23 @@ private struct RoutePlaceReviewView: View {
     }
 }
 
-private struct RouteDayReviewView: View {
-    let day: RouteReviewDay
+private struct CurrentReviewKey: EnvironmentKey {
+    static let defaultValue: RouteReview? = nil
+}
+
+extension EnvironmentValues {
+    var currentRouteReview: RouteReview? {
+        get { self[CurrentReviewKey.self] }
+        set { self[CurrentReviewKey.self] = newValue }
+    }
+}
+
+struct RouteDayReviewView: View {
+    @Environment(\.currentRouteReview) private var currentReview
+    private let initialDay: RouteReviewDay
+    private var day: RouteReviewDay {
+        currentReview?.days.first { $0.date == initialDay.date } ?? initialDay
+    }
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -322,7 +337,7 @@ private struct RouteDayReviewView: View {
     }
 
     init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil, allowsAutomaticLookup: Bool = true) {
-        self.day = day
+        self.initialDay = day
         initialFocus = focus
         self.allowsAutomaticLookup = allowsAutomaticLookup
         _selection = State(initialValue: Selection(id: focus))

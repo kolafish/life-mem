@@ -130,6 +130,7 @@ private struct RootView: View {
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
         }
+        .environment(\.currentRouteReview, review)
         .tint(.indigo)
         .task(id: request) {
             guard let request, !Task.isCancelled else { return }
@@ -141,7 +142,7 @@ private struct RootView: View {
                   request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
             let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
             if summaryRevision != request.revision {
-                summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] })
+                summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] }, calendar: request.revision.calendar)
                 summaryRevision = request.revision
             }
             await index.save(records, for: request.revision, after: .seconds(1))

@@ -2,6 +2,10 @@ import CoreLocation
 import SwiftUI
 
 struct TimelineSegmentRow: View {
+    @Environment(\.modelContext) private var context
+    @State private var editVisit = false
+    @State private var saveError = false
+    @State private var draftName = ""
     let entry: RouteReviewEntry
     let selected: Bool
     let select: () -> Void
@@ -57,13 +61,39 @@ struct TimelineSegmentRow: View {
                     .font(.subheadline)
                     .padding(.vertical, 6)
                 }
-                namingAction(for: entry)
+                if let stay = entry.stay {
+                    HStack {
+                        if stay.isCandidate == true {
+                            Button("确认到访") { save(stay, name: nil) }
+                            Button("忽略") { save(stay, name: nil, ignore: true) }
+                        }
+                        Button("只改这次地点") {
+                            draftName = stay.visitName ?? ""
+                            editVisit = true
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if entry.stay?.isCandidate != true { namingAction(for: entry) }
             }
         }
+        .alert("只改这次地点", isPresented: $editVisit) {
+            TextField("地点名称", text: $draftName)
+            Button("保存") { if let stay = entry.stay { save(stay, name: draftName) } }
+            Button("取消", role: .cancel) {}
+        } message: { Text("留空会使用附近地点的默认名称。") }
+        .alert("未能保存到访", isPresented: $saveError) {
+            Button("好", role: .cancel) {}
+        } message: { Text("请重新打开当天的记录，检查可用空间后再试。") }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(selected ? Color.indigo.opacity(0.09) : Color(uiColor: .secondarySystemGroupedBackground),
                     in: .rect(cornerRadius: 14))
+    }
+
+    private func save(_ stay: StayEvent, name: String?, ignore: Bool = false) {
+        do { try VisitCorrection.save(stay, name: name, ignore: ignore, in: context) }
+        catch { saveError = true }
     }
 
     @ViewBuilder
@@ -90,7 +120,7 @@ struct TimelineSegmentRow: View {
 
     private func title(for entry: RouteReviewEntry) -> String {
         if let coordinate = entry.visitCoordinate {
-            let name = placeResolver.label(near: coordinate, names: placeNames)
+            let name = entry.stay?.visitName ?? placeResolver.label(near: coordinate, names: placeNames)
             if entry.stay?.isCandidate == true { return name.map { "可能在\($0)附近停留" } ?? "可能的停留 · 待确认" }
             return name ?? "停留地点"
         }

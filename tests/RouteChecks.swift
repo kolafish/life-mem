@@ -1224,11 +1224,37 @@ struct RouteChecks {
         let projected = candidates()
         precondition(projected.count == 2 && Set(projected.map(\.visitID)).count == 1)
         precondition(RouteReview(routes: [b, a], calendar: calendar).places.isEmpty)
+        try VisitCorrection.save(projected[0], name: "测试书店", in: context)
+        let confirmed = RouteReview(routes: [b, a], calendar: calendar)
+        precondition(confirmed.places.count == 1 && confirmed.places[0].visitName == "测试书店")
+        precondition(confirmed.days.flatMap(\.stays).count == 2)
+        let revision = RouteReviewRevision(calendar: calendar, routes: [a, b])
+        let records = RouteReviewCache().summaries(for: [a, b], revision: revision, indexed: [:])
+        let indexed = RouteSummary(records: Array(records.values), calendar: calendar)
+        precondition(indexed.places.count == 1 && indexed.days.flatMap(\.stays).count == 2)
+        try VisitCorrection.save(projected[0], name: nil, ignore: true, in: context)
+        precondition(candidates().isEmpty && RouteReview(routes: [b, a], calendar: calendar).places.isEmpty)
+        b.arrivalDecision = nil
         b.automaticSessionStart = midnight
         precondition(candidates().isEmpty)
         b.automaticSessionStart = a.automaticSessionStart
         b.previousAutomaticRouteID = nil
         precondition(candidates().isEmpty)
+        let visitStart = midnight.addingTimeInterval(5000)
+        let observed = RecordedRoute(startedAt: visitStart)
+        context.insert(observed)
+        for seconds in stride(from: 0, through: 600, by: 30) {
+            let fix = location(longitude: 0, at: visitStart.addingTimeInterval(Double(seconds)))
+            context.insert(RoutePoint(location: fix, mode: .stationary, startsNewSegment: seconds == 0, route: observed))
+            observed.pointCount += 1
+        }
+        try context.save()
+        let stay = RouteReview(routes: [observed], calendar: calendar).days[0].stays[0]
+        try VisitCorrection.save(stay, name: "隔壁咖啡店", in: context)
+        let edited = RouteReview(routes: [observed], calendar: calendar)
+        precondition(edited.places[0].visitName == "隔壁咖啡店")
+        let all = RoutePlace.group(edited.places[0].visits + confirmed.places[0].visits, within: 100)
+        precondition(all.count == 2)
     }
 
     @MainActor

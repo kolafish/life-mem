@@ -11,6 +11,9 @@ final class RecordedRoute {
     var automaticSessionStart: Date?
     var previousAutomaticRouteID: UUID?
     var endedAtRest: Bool?
+    var visitRevision: UUID?
+    var arrivalDecision: String?
+    var arrivalName: String?
     var isFinished: Bool
     var pointCount: Int
     var distanceMeters: Double
@@ -34,6 +37,7 @@ final class RoutePoint {
     var latitude: Double
     var longitude: Double
     var accuracy: Double
+    var visitName: String?
     var travelMode: String
     var startsNewSegment: Bool
     var startsRecordingRun: Bool?
@@ -66,5 +70,36 @@ final class RoutePoint {
             startsNewSegment: startsNewSegment,
             startsRecordingRun: startsRecordingRun
         )
+    }
+}
+
+@MainActor
+enum VisitCorrection {
+    enum Failure: Error { case sourceUnavailable }
+
+    static func save(_ stay: StayEvent, name: String?, ignore: Bool = false, in context: ModelContext) throws {
+        let label = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedName = label?.isEmpty == false ? label : nil
+        let route: RecordedRoute
+        if stay.isInferred == true {
+            guard let owner = try context.fetch(FetchDescriptor<RecordedRoute>(
+                predicate: #Predicate { $0.isAutomatic == true })).first(where: { $0.persistentModelID == stay.visitID }),
+                  owner.previousAutomaticRouteID == stay.sourceArrivalID,
+                  let previous = stay.sourceArrivalID,
+                  try context.fetchCount(FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == previous })) == 1
+            else { throw Failure.sourceUnavailable }
+            owner.arrivalDecision = ignore ? "ignored" : "confirmed"
+            owner.arrivalName = ignore ? nil : savedName
+            route = owner
+        } else {
+            let id = stay.visitID
+            guard !ignore, let point = try context.fetch(FetchDescriptor<RoutePoint>(
+                predicate: #Predicate { $0.persistentModelID == id })).first, let owner = point.route
+            else { throw Failure.sourceUnavailable }
+            point.visitName = savedName
+            route = owner
+        }
+        route.visitRevision = UUID()
+        do { try context.save() } catch { context.rollback(); throw error }
     }
 }
