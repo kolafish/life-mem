@@ -6,7 +6,8 @@ struct RouteMapContainer: View {
     let selected: RouteReviewEntry?
     let focusRequest: UUID
     var photo: CLLocationCoordinate2D? = nil
-    var openMap: (() -> Void)? = nil
+    var groupCoordinate: CLLocationCoordinate2D? = nil
+    var openMap: ((CLLocationCoordinate2D?) -> Void)? = nil
     let selectEntry: (RouteReviewEntry.ID) -> Void
 
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -27,7 +28,7 @@ struct RouteMapContainer: View {
     var body: some View {
         if let openMap {
             routeMap.accessibilityRepresentation {
-                Button(action: openMap) {
+                Button { openMap(nil) } label: {
                     Text("打开当天全屏地图").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .accessibilityIdentifier("day-map-preview")
@@ -100,6 +101,8 @@ struct RouteMapContainer: View {
                 if let photo {
                     position = .region(MKCoordinateRegion(center: RouteMapProjection.standard.coordinate(for: photo),
                                                           latitudinalMeters: 240, longitudinalMeters: 240))
+                } else if let groupCoordinate {
+                    position = stayCamera(at: groupCoordinate)
                 } else { position = selected.map(camera(for:)) ?? .automatic }
             }
             .onChange(of: selected?.endedAt) {
@@ -107,7 +110,7 @@ struct RouteMapContainer: View {
             }
             .simultaneousGesture(SpatialTapGesture().onEnded { tap in
                 if let id = trip(at: tap.location, proxy: proxy) { selectEntry(id) }
-                else { openMap?() }
+                else { openMap?(nil) }
             })
         }
     }
@@ -166,7 +169,9 @@ struct RouteMapContainer: View {
         return Group {
             if group.stays.count == 1 || openMap != nil {
                 Button {
-                    selectEntry(group.stays.first(where: { $0.id == selected?.id })?.id ?? group.id)
+                    if group.stays.count == 1 { selectEntry(group.id) }
+                    else if let id = selected?.id, isSelected { selectEntry(id) }
+                    else { openMap?(group.coordinate) }
                 } label: {
                     markerLabel(detail, category: category, selected: isSelected)
                 }
@@ -199,11 +204,13 @@ struct RouteMapContainer: View {
             .contentShape(Rectangle())
     }
 
+    private func stayCamera(at coordinate: CLLocationCoordinate2D) -> MapCameraPosition {
+        let center = RouteMapProjection.standard.coordinate(for: coordinate)
+        return .region(MKCoordinateRegion(center: center, latitudinalMeters: 420, longitudinalMeters: 420))
+    }
+
     private func camera(for entry: RouteReviewEntry) -> MapCameraPosition {
-        if let coordinate = entry.visitCoordinate {
-            let center = RouteMapProjection.standard.coordinate(for: coordinate)
-            return .region(MKCoordinateRegion(center: center, latitudinalMeters: 420, longitudinalMeters: 420))
-        }
+        if let coordinate = entry.visitCoordinate { return stayCamera(at: coordinate) }
         let coordinates = entry.segments.flatMap(\.coordinates)
         guard let firstCoordinate = coordinates.first else { return .automatic }
         let first = RouteMapProjection.standard.coordinate(for: firstCoordinate)

@@ -416,10 +416,12 @@ struct RouteDayReviewView: View {
 
     private struct Selection {
         var id: RouteReviewEntry.ID?
+        var groupCoordinate: CLLocationCoordinate2D?
         private(set) var request = UUID()
 
-        mutating func focus(_ id: RouteReviewEntry.ID?) {
+        mutating func focus(_ id: RouteReviewEntry.ID?, group: CLLocationCoordinate2D? = nil) {
             self.id = id
+            groupCoordinate = group
             request = UUID()
         }
     }
@@ -485,7 +487,10 @@ struct RouteDayReviewView: View {
                             }
                             .frame(minHeight: 44)
                             RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request,
-                                              openMap: { expandedMap = true }) { id in
+                                              openMap: { group in
+                                if let group { selection.focus(nil, group: group) }
+                                expandedMap = true
+                            }) { id in
                                 selection.focus(id)
                                 expandedMap = true
                             }
@@ -505,11 +510,13 @@ struct RouteDayReviewView: View {
                 if let id = selection.id {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
                 }
+                if selection.groupCoordinate != nil { selection.focus(nil) }
                 photoRequest = nil
             }) {
                 NavigationStack {
                     GeometryReader { area in
-                        RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request, photo: photoRequest?.coordinate) { id in
+                        RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request,
+                                          photo: photoRequest?.coordinate, groupCoordinate: selection.groupCoordinate) { id in
                             photoRequest = nil
                             selection.focus(id)
                         }

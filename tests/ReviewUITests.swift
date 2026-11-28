@@ -142,6 +142,15 @@ final class ReviewUITests: XCTestCase {
         reset.tap()
         XCTAssertFalse(reset.exists)
 
+        // The office is the eastern stop in this synthetic route.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.84, dy: 0.5)).tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+        let focusedStop = app.buttons.matching(identifier: "timeline-entry").firstMatch
+        XCTAssertTrue(focusedStop.waitForExistence(timeout: 5))
+        XCTAssertTrue(focusedStop.label.contains("测试办公室") && !focusedStop.label.contains("→"))
+        app.buttons["返回时间线"].tap()
+        reset.tap()
+
         preview.coordinate(withNormalizedOffset: blankMap).tap()
         let map = app.descendants(matching: .any).matching(identifier: "daily-route-map").firstMatch
         map.swipeLeft()
@@ -162,6 +171,31 @@ final class ReviewUITests: XCTestCase {
         app.buttons["返回时间线"].tap()
         XCTAssertTrue(office.isHittable)
         XCTAssertTrue(office.isSelected, app.debugDescription)
+    }
+
+    func testPreviewOpensRepeatedStopWithoutChoosingAVisit() {
+        let app = launch(fixture: "mainland-day")
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons.matching(identifier: "review-day").firstMatch.tap()
+        let preview = app.buttons["day-map-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        // The fixture returns to the western end of its straight eastbound route.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.5)).tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+        let group = app.buttons.matching(identifier: "stay-marker")
+            .matching(NSPredicate(format: "label CONTAINS %@", "测试之家")).firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        XCTAssertFalse(group.isSelected)
+        XCTAssertEqual(group.frame.midX, app.frame.midX, accuracy: 32)
+        group.tap()
+        let lastVisit = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "08:35")).firstMatch
+        XCTAssertTrue(lastVisit.waitForExistence(timeout: 5))
+        lastVisit.tap()
+        let card = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "08:35", "测试之家")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.isHittable)
+        XCTAssertTrue(group.isSelected)
     }
 
     #if targetEnvironment(simulator)
