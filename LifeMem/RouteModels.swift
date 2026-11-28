@@ -193,7 +193,25 @@ final class RouteMemory {
     var owner: RecordedRoute?
     var previous: RecordedRoute?
 
-    var isAnnotated: Bool { !text.isEmpty || draft != nil || photos?.contains(where: { !$0.hidden }) == true }
+    var isAnnotated: Bool {
+        !text.isEmpty || draft != nil || photos?.contains { !$0.hidden && $0.memory?.key == key } == true
+    }
+
+    func attachment(for assetID: String?, in writer: ModelContext) throws -> MemoryPhoto {
+        if let assetID, let photo = try attachedPhoto(for: assetID, in: writer) { return photo }
+        let photo = MemoryPhoto(memory: self, assetID: assetID)
+        writer.insert(photo)
+        return photo
+    }
+
+    fileprivate func attachedPhoto(for assetID: String, in writer: ModelContext) throws -> MemoryPhoto? {
+        let ownerKey = key
+        var descriptor = FetchDescriptor<MemoryPhoto>(predicate: #Predicate {
+            $0.assetID == assetID && $0.memory?.key == ownerKey
+        })
+        descriptor.fetchLimit = 1
+        return try writer.fetch(descriptor).first
+    }
 
     init(key: String, owner: RecordedRoute, previous: RecordedRoute?) {
         self.key = key
@@ -222,6 +240,32 @@ final class MemoryPhoto {
         hidden = false
         self.memory = memory
         self.assetID = assetID
+    }
+
+    func hide(in writer: ModelContext) {
+        hidden = true
+        image = nil
+        thumbnail = nil
+        if assetID == nil { writer.delete(self) }
+    }
+
+    func move(to destination: RouteMemory, in writer: ModelContext) throws {
+        guard let origin = memory, origin.key != destination.key else { return }
+        if let assetID, let existing = try destination.attachedPhoto(for: assetID, in: writer) {
+            if let image {
+                existing.image = image
+                existing.thumbnail = thumbnail
+                existing.taken = taken
+                existing.latitude = latitude
+                existing.longitude = longitude
+            }
+            existing.hidden = false
+            hidden = true
+            writer.delete(self)
+        } else {
+            memory = destination
+        }
+        if !origin.isAnnotated { origin.owner?.visitRevision = UUID() }
     }
 
     var coordinate: CLLocationCoordinate2D? {

@@ -534,6 +534,7 @@ struct RouteDayReviewView: View {
 
     private func mapCard(_ entry: RouteReviewEntry) -> some View {
         TimelineSegmentRow(entry: entry, selected: false, showMemoryActions: true) {
+            photoRequest = nil
             selection.focus(entry.id)
         } nameTarget: { _ in }
         .padding(8)

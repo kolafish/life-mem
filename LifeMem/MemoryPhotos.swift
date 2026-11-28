@@ -43,11 +43,12 @@ private struct ImportedImage: Transferable {
 
     init(url: URL) throws {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw CocoaError(.fileReadCorruptFile) }
+        let primary = CGImageSourceGetPrimaryImageIndex(source)
         func jpeg(edge: Int) throws -> Data {
             let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                            kCGImageSourceCreateThumbnailWithTransform: true,
                                            kCGImageSourceThumbnailMaxPixelSize: edge]
-            guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(source, primary, options as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
             let bytes = NSMutableData()
             guard let output = CGImageDestinationCreateWithData(bytes, UTType.jpeg.identifier as CFString, 1, nil) else { throw CocoaError(.fileWriteUnknown) }
             CGImageDestinationAddImage(output, cg, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
@@ -56,7 +57,7 @@ private struct ImportedImage: Transferable {
         }
         image = try jpeg(edge: 2304)
         thumbnail = try jpeg(edge: 320)
-        let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let metadata = CGImageSourceCopyPropertiesAtIndex(source, primary, nil) as? [CFString: Any]
         let gps = metadata?[kCGImagePropertyGPSDictionary] as? [CFString: Any]
         if let lat = gps?[kCGImagePropertyGPSLatitude] as? Double, let lon = gps?[kCGImagePropertyGPSLongitude] as? Double,
            let ns = gps?[kCGImagePropertyGPSLatitudeRef] as? String, let ew = gps?[kCGImagePropertyGPSLongitudeRef] as? String {
@@ -178,17 +179,8 @@ struct DayPhotoPicker: ViewModifier {
             do {
                 guard let imported = try await item.loadTransferable(type: ImportedImage.self) else { throw CocoaError(.fileReadUnknown) }
                 try key.update(in: context.container) { memory, writer in
-                    let photo: MemoryPhoto
-                    if let id = item.itemIdentifier, let existing = try writer.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == id })).first {
-                        photo = existing
-                        let origin = photo.memory
-                        photo.memory = memory
-                        if let origin, origin != memory, !origin.isAnnotated { origin.owner?.visitRevision = UUID() }
-                        photo.hidden = false
-                    } else {
-                        photo = MemoryPhoto(memory: memory, assetID: item.itemIdentifier)
-                        writer.insert(photo)
-                    }
+                    let photo = try memory.attachment(for: item.itemIdentifier, in: writer)
+                    photo.hidden = false
                     photo.image = imported.image
                     photo.thumbnail = imported.thumbnail
                     photo.taken = imported.taken
@@ -226,8 +218,7 @@ private struct MemoryPhotoViewer: View {
                 TabView(selection: $selection) {
                     ForEach(photos) { item in
                         Group {
-                            if item.id != selection { Color.clear }
-                            else if let data = item.image, let image = UIImage(data: data) {
+                            if let data = item.id == selection ? item.image : item.thumbnail, let image = UIImage(data: data) {
                                 Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("照片")
                             } else { ContentUnavailableView("照片不可用", systemImage: "photo") }
                         }.tag(item.id)
@@ -279,11 +270,8 @@ private struct MemoryPhotoViewer: View {
             try key.update(in: context.container) { destination, writer in
                 guard let photo = try writer.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.id == id })).first
                 else { throw VisitCorrection.Failure.sourceUnavailable }
-                let origin = photo.memory
-                if target != nil { photo.memory = destination }
-                else if photo.assetID == nil { writer.delete(photo) }
-                else { photo.hidden = true; photo.image = nil; photo.thumbnail = nil }
-                if let origin, origin != destination, !origin.isAnnotated { origin.owner?.visitRevision = UUID() }
+                if target != nil { try photo.move(to: destination, in: writer) }
+                else { photo.hide(in: writer) }
             }
             if moving { closeAfterMove = true; moving = false } else { dismiss() }
         } catch { failed = true }

@@ -179,6 +179,8 @@ final class ReviewUITests: XCTestCase {
         screen.name = "Photo location and timeline card"
         screen.lifetime = .keepAlways
         add(screen)
+        app.buttons.matching(identifier: "timeline-entry").firstMatch.tap()
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "photo-map-pin").firstMatch.exists)
         app.buttons["返回时间线"].tap()
         let selected = app.buttons.matching(identifier: "timeline-entry").matching(NSPredicate(format: "isSelected == true")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 5))

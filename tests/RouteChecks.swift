@@ -142,7 +142,53 @@ struct RouteChecks {
         let orphanPhotos = try afterRemoval.fetchCount(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == "cross-context-photo" }))
         precondition(orphanPhotos == 0)
         precondition(orphanCount == 0 && pointsAfterRemoval.allSatisfy { !originalPointIDs.contains($0.persistentModelID) })
+        try checkPhotoAttachments(context: context, start: start)
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+    }
+
+    @MainActor
+    private static func checkPhotoAttachments(context: ModelContext, start: Date) throws {
+        let a = insertRoute(context: context, start: start, samples: [(0, 0, .walking, true), (20, 0.001, .walking, false)])
+        let b = insertRoute(context: context, start: start.addingTimeInterval(60), samples: [(0, 0, .walking, true), (20, 0.001, .walking, false)])
+        try context.save()
+        let source = RouteMemoryKey(owner: a.id, start: a.startedAt)
+        let destination = RouteMemoryKey(owner: b.id, start: b.startedAt)
+        let asset = "same-synthetic-asset"
+        let container = context.container
+        for key in [source, source, destination] {
+            try key.update(in: container) { memory, writer in
+                let photo = try memory.attachment(for: asset, in: writer)
+                photo.thumbnail = Data([2])
+            }
+        }
+        func copies() throws -> [MemoryPhoto] {
+            try ModelContext(container).fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == asset }))
+        }
+        let both = try copies()
+        precondition(both.count == 2 && Set(both.compactMap { $0.memory?.key }) == [source.value, destination.value])
+        let cachedSource = try source.memory(in: context)
+        precondition(cachedSource.photos?.count == 1)
+        try destination.update(in: container) { target, writer in
+            let origin = try source.memory(in: writer)
+            let photo = try origin.attachment(for: asset, in: writer)
+            try photo.move(to: target, in: writer)
+        }
+        try a.deleteWithMemories(in: context)
+        try context.save()
+        let moved = try copies()
+        precondition(moved.count == 1 && moved[0].memory?.key == destination.value)
+
+        try destination.update(in: container) { memory, writer in
+            try memory.attachment(for: asset, in: writer).hide(in: writer)
+            _ = try memory.attachment(for: nil, in: writer)
+        }
+        let prior = try destination.memory(in: ModelContext(container)).owner?.visitRevision
+        try destination.update(in: container) { memory, writer in
+            let photo = memory.photos!.first { $0.assetID == nil }!
+            photo.hide(in: writer)
+        }
+        let after = try destination.memory(in: ModelContext(container))
+        precondition(!after.isAnnotated && after.owner?.visitRevision != prior)
     }
 
     private static func checkMapProjection() {
