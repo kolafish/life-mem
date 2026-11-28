@@ -204,7 +204,7 @@ final class RouteMemory {
         return photo
     }
 
-    fileprivate func attachedPhoto(for assetID: String, in writer: ModelContext) throws -> MemoryPhoto? {
+    private func attachedPhoto(for assetID: String, in writer: ModelContext) throws -> MemoryPhoto? {
         let ownerKey = key
         var descriptor = FetchDescriptor<MemoryPhoto>(predicate: #Predicate {
             $0.assetID == assetID && $0.memory?.key == ownerKey
@@ -251,20 +251,20 @@ final class MemoryPhoto {
 
     func move(to destination: RouteMemory, in writer: ModelContext) throws {
         guard let origin = memory, origin.key != destination.key else { return }
-        if let assetID, let existing = try destination.attachedPhoto(for: assetID, in: writer) {
-            if let image {
-                existing.image = image
-                existing.thumbnail = thumbnail
-                existing.taken = taken
-                existing.latitude = latitude
-                existing.longitude = longitude
-            }
-            existing.hidden = false
-            hidden = true
-            writer.delete(self)
-        } else {
-            memory = destination
+        // On iOS 17 a loaded cascade can delete a reparented row with its former route.
+        // Transfer the contents in one transaction so each route owns its own attachment.
+        let replacement = try destination.attachment(for: assetID, in: writer)
+        replacement.added = min(replacement.added, added)
+        if image != nil || replacement.image == nil {
+            replacement.image = image
+            replacement.thumbnail = thumbnail
+            replacement.taken = taken
+            replacement.latitude = latitude
+            replacement.longitude = longitude
         }
+        replacement.hidden = false
+        hidden = true
+        writer.delete(self)
         if !origin.isAnnotated { origin.owner?.visitRevision = UUID() }
     }
 

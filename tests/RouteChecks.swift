@@ -166,19 +166,33 @@ struct RouteChecks {
         }
         let both = try copies()
         precondition(both.count == 2 && Set(both.compactMap { $0.memory?.key }) == [source.value, destination.value])
+        let secondAsset = "only-at-source"
+        let pixels = Data(repeating: 42, count: 256_000)
+        try source.update(in: container) { memory, writer in
+            let original = try memory.attachment(for: secondAsset, in: writer)
+            original.image = pixels
+            original.thumbnail = Data([4])
+            original.taken = start
+        }
         let cachedSource = try source.memory(in: context)
-        precondition(cachedSource.photos?.count == 1)
+        precondition(cachedSource.photos?.count == 2)
         try destination.update(in: container) { target, writer in
             let origin = try source.memory(in: writer)
             let photo = try origin.attachment(for: asset, in: writer)
             try photo.move(to: target, in: writer)
+            try origin.attachment(for: secondAsset, in: writer).move(to: target, in: writer)
         }
         try a.deleteWithMemories(in: context)
         try context.save()
         let moved = try copies()
         precondition(moved.count == 1 && moved[0].memory?.key == destination.value)
 
+        let reopened = ModelContext(container)
+        let transferred = try reopened.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == secondAsset }))
+        precondition(transferred.count == 1 && transferred[0].memory?.key == destination.value)
+        precondition(transferred[0].image == pixels && transferred[0].thumbnail == Data([4]) && transferred[0].taken == start)
         try destination.update(in: container) { memory, writer in
+            try memory.attachment(for: secondAsset, in: writer).hide(in: writer)
             try memory.attachment(for: asset, in: writer).hide(in: writer)
             _ = try memory.attachment(for: nil, in: writer)
         }
