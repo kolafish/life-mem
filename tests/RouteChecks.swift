@@ -1566,7 +1566,7 @@ struct RouteChecks {
     private static func checkDrivingStops() throws {
         // Feed the live recorder, reopen its archive, then check both the timeline and the index.
         let start = Date(timeIntervalSince1970: 1_600_000_000)
-        func replay(shop: Bool, paused: Bool = false, creep: Double = 0, stopAndGo: Bool = false, restore: Bool = false, inVehicle: Bool = false, crawlBefore: Bool = false, crawlAfter: Bool = false, distantSignalLoss: Bool = false, latePause: Bool = false) throws {
+        func replay(shop: Bool, paused: Bool = false, creep: Double = 0, stopAndGo: Bool = false, restore: Bool = false, inVehicle: Bool = false, crawlBefore: Bool = false, crawlAfter: Bool = false, distantSignalLoss: Bool = false, latePause: Bool = false, resumeWhileMoving: Bool = false) throws {
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
             let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: config)
             var recorder = AutomaticTrips(context: store.mainContext)
@@ -1623,7 +1623,7 @@ struct RouteChecks {
                 try fix(0, paused: true)
                 time.addTimeInterval(25)
                 if restore { try reopen() }
-                try fix(0)
+                if !resumeWhileMoving { try fix(0) }
             }
             if shop && !distantSignalLoss { try move(40, north: -1); try move(30) }
             if crawlAfter { try move(50, east: 1) }
@@ -1660,6 +1660,8 @@ struct RouteChecks {
         try replay(shop: false, paused: true, crawlBefore: true, crawlAfter: true)
         try replay(shop: false, crawlBefore: true, latePause: true)
         try replay(shop: false, restore: true, crawlBefore: true, latePause: true)
+        try replay(shop: false, crawlBefore: true, latePause: true, resumeWhileMoving: true)
+        try replay(shop: false, restore: true, crawlBefore: true, latePause: true, resumeWhileMoving: true)
         try replay(shop: true, latePause: true)
         try replay(shop: true, restore: true, latePause: true)
 

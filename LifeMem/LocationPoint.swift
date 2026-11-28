@@ -199,6 +199,7 @@ enum RouteStep {
 /// speed are common in a queue, so require displacement beyond the GPS error.
 struct ArrivalMotion {
     static let maximumResumption: TimeInterval = 24 * 3600
+    static let resumptionRadius: CLLocationDistance = 100
 
     private(set) var mode: TravelMode = .unknown
     private(set) var includesDriving = false
@@ -265,12 +266,14 @@ struct ArrivalMotion {
                 // A resumed automatic run still has a map break. Look at travel on
                 // its far side only if it restarts at the same observed position.
                 let gap = later.timestamp.timeIntervalSince(earlier.timestamp)
-                guard acrossResumption, later.startsRecordingRun == true, gap <= ArrivalMotion.maximumResumption,
-                      later.fix.distance(from: earlier.fix) <= max(25, later.accuracy, earlier.accuracy) else { break }
+                let distance = later.fix.distance(from: earlier.fix)
+                guard acrossResumption, later.startsRecordingRun == true, gap <= Self.maximumResumption,
+                      distance <= Self.resumptionRadius else { break }
                 evidence = Self()
-                // Over a long blind interval only use the subsequent vehicle
-                // context to rule out a stop, never to establish a walk.
-                if closest == nil, gap > LocationSampling.maximumGap { closest = evidence }
+                // A late first fix may already be down the road. Vehicle evidence
+                // can rule out a stop across this gap, but cannot establish a walk.
+                let samePosition = distance <= max(25, later.accuracy, earlier.accuracy)
+                if closest == nil, gap > LocationSampling.maximumGap || !samePosition { closest = evidence }
             }
             if closest == nil {
                 evidence.observe(point.mode, at: point.fix)

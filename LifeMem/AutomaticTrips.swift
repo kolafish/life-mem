@@ -127,7 +127,7 @@ final class AutomaticTrips {
         if let recent = route, let stopped = recent.automaticPauseAt,
            anchor.timestamp.timeIntervalSince(stopped) <= ArrivalMotion.maximumResumption,
            ((!observedArrival && anchor.timestamp.timeIntervalSince(stopped) < Self.shortStop) || !supportsDeparture(from: anchor, to: location)),
-           let lastFix, anchor.distance(from: lastFix) <= 100 {
+           let lastFix, anchor.distance(from: lastFix) <= ArrivalMotion.resumptionRadius {
             trip = recent
         } else {
             var query = FetchDescriptor<RecordedRoute>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
