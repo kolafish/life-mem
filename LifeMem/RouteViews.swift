@@ -237,24 +237,24 @@ private struct RoutePlaceReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @State private var namingTarget: PlaceNamingTarget?
+    @State private var expandedMap = false
 
     var body: some View {
         let canLookUp = place.visitName == nil && scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
         let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
-        let mapCoordinate = RouteMapProjection.standard.coordinate(for: place.coordinate)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
             Section {
-                Map(
-                    initialPosition: .region(MKCoordinateRegion(center: mapCoordinate, latitudinalMeters: 500, longitudinalMeters: 500)),
-                    interactionModes: [.pan, .zoom]
-                ) {
-                    Marker(name ?? "停留地点", coordinate: mapCoordinate).tint(.indigo)
-                }
-                .mapStyle(.standard(emphasis: .muted))
-                .frame(height: 220)
-                .accessibilityLabel("停留地点地图")
-                .listRowInsets(EdgeInsets())
+                placeMap(name, interactive: false)
+                    .frame(height: 220)
+                    .onTapGesture { expandedMap = true }
+                    .accessibilityRepresentation {
+                        Button { expandedMap = true } label: {
+                            Text("打开停留地点全屏地图").frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .accessibilityIdentifier("place-map-preview")
+                    }
+                    .listRowInsets(EdgeInsets())
                 if let suggestedCategory, placeNames.category(for: place.coordinate) == nil {
                     Button("设为\(suggestedCategory.title)") {
                         namingTarget = PlaceNamingTarget(
@@ -290,6 +290,18 @@ private struct RoutePlaceReviewView: View {
             guard canLookUp else { return }
             await placeResolver.resolveAutomatically(near: place.coordinate, names: placeNames)
         }
+        .fullScreenCover(isPresented: $expandedMap) {
+            NavigationStack {
+                placeMap(name, interactive: true)
+                    .navigationTitle(name ?? "停留地点")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("返回地点") { expandedMap = false }
+                        }
+                    }
+            }
+        }
         .sheet(item: $namingTarget) { target in
             PlaceNamingView(
                 target: target,
@@ -297,6 +309,15 @@ private struct RoutePlaceReviewView: View {
                 category: placeNames.category(for: target.coordinate) ?? target.suggestedCategory
             )
         }
+    }
+
+    private func placeMap(_ name: String?, interactive: Bool) -> some View {
+        let coordinate = RouteMapProjection.standard.coordinate(for: place.coordinate)
+        return Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 500, longitudinalMeters: 500)),
+                   interactionModes: interactive ? [.pan, .zoom] : []) {
+            Marker(name ?? "停留地点", coordinate: coordinate).tint(.indigo)
+        }
+        .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
     }
 }
 
@@ -388,7 +409,6 @@ struct RouteDayReviewView: View {
     @Query(filter: #Predicate<MemoryPhoto> { $0.assetID != nil }) private var photoDecisions: [MemoryPhoto]
     @State private var photoRequest: PhotoMapRequest?
     @State private var expandedMap = false
-    @State private var scrollAfterMap: RouteReviewEntry.ID?
     @State private var selection: Selection
     @State private var namingTarget: PlaceNamingTarget?
     private let initialFocus: RouteReviewEntry.ID?
@@ -396,10 +416,12 @@ struct RouteDayReviewView: View {
 
     private struct Selection {
         var id: RouteReviewEntry.ID?
+        var groupCoordinate: CLLocationCoordinate2D?
         private(set) var request = UUID()
 
-        mutating func focus(_ id: RouteReviewEntry.ID?) {
+        mutating func focus(_ id: RouteReviewEntry.ID?, group: CLLocationCoordinate2D? = nil) {
             self.id = id
+            groupCoordinate = group
             request = UUID()
         }
     }
@@ -425,7 +447,6 @@ struct RouteDayReviewView: View {
             day.title(for: entry) { placeResolver.label(near: $0, names: placeNames) }
         }, showMap: { request in
             selection.focus(request.entryID)
-            scrollAfterMap = request.entryID
             photoRequest = request
             expandedMap = true
         })
@@ -458,14 +479,6 @@ struct RouteDayReviewView: View {
                             HStack {
                                 Text("时间线").font(.headline).accessibilityAddTraits(.isHeader)
                                 Spacer(minLength: 8)
-                                Button {
-                                    scrollAfterMap = selection.id
-                                    expandedMap = true
-                                } label: {
-                                    Label("展开地图", systemImage: "arrow.up.left.and.arrow.down.right")
-                                }
-                                .font(.subheadline)
-                                .frame(minHeight: 44)
                                 if selected != nil {
                                     Button("显示全天") { selection.focus(nil) }
                                         .font(.subheadline)
@@ -473,9 +486,12 @@ struct RouteDayReviewView: View {
                                 }
                             }
                             .frame(minHeight: 44)
-                            RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request) { id in
+                            RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request,
+                                              openMap: { group in
+                                if let group { selection.focus(nil, group: group) }
+                                expandedMap = true
+                            }) { id in
                                 selection.focus(id)
-                                scrollAfterMap = id
                                 expandedMap = true
                             }
                             .frame(height: 184)
@@ -491,18 +507,18 @@ struct RouteDayReviewView: View {
             .modifier(DayPhotoPicker())
             .modifier(EntryNotePresentation())
             .fullScreenCover(isPresented: $expandedMap, onDismiss: {
-                if let id = scrollAfterMap {
+                if let id = selection.id {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
                 }
-                scrollAfterMap = nil
+                if selection.groupCoordinate != nil { selection.focus(nil) }
                 photoRequest = nil
             }) {
                 NavigationStack {
                     GeometryReader { area in
-                        RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request, photo: photoRequest?.coordinate) { id in
+                        RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request,
+                                          photo: photoRequest?.coordinate, groupCoordinate: selection.groupCoordinate) { id in
                             photoRequest = nil
                             selection.focus(id)
-                            scrollAfterMap = id
                         }
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             if let selected {
@@ -521,7 +537,7 @@ struct RouteDayReviewView: View {
                             Button("返回时间线") { expandedMap = false }
                         }
                         ToolbarItem(placement: .primaryAction) {
-                            Button("显示全天") { photoRequest = nil; selection.focus(nil); scrollAfterMap = nil }
+                            Button("显示全天") { photoRequest = nil; selection.focus(nil) }
                         }
                     }
                 }
