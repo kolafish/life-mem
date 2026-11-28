@@ -114,9 +114,9 @@ private struct JournalMemories: View {
                         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder((scheme == .dark ? Color.white : .black).opacity(0.10)) }
                 }
                 .buttonStyle(.plain).accessibilityLabel("查看照片和语音留言")
-                if let duration = photo.saved?.voiceDuration {
-                    MemoPlayButton(playback: playback, id: photo.id, duration: duration) { photo.saved?.voiceAudio }
-                    if let words = photo.saved?.voiceTranscript, !words.isEmpty {
+                if let saved = photo.saved, let duration = saved.voiceDuration {
+                    MemoPlayButton(playback: playback, id: saved.id.uuidString, duration: duration) { saved.voiceAudio }
+                    if let words = saved.voiceTranscript, !words.isEmpty {
                         Text(words).font(.body).lineSpacing(4).textSelection(.enabled)
                             .padding(.leading, 12)
                             .overlay(alignment: .leading) { Capsule().fill(.tint.opacity(0.38)).frame(width: 2) }
@@ -138,8 +138,10 @@ private extension GalleryPhoto {
         } else if let data = saved?.image, let image = UIImage(data: data) {
             Image(uiImage: image).resizable().scaledToFit()
         } else {
-            Image(systemName: "photo").frame(maxWidth: .infinity, minHeight: 100)
-                .accessibilityLabel("照片不可用")
+            Label("照片当前不可用", systemImage: "photo")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 100)
+                .background(Color(uiColor: .secondarySystemBackground))
         }
     }
 }

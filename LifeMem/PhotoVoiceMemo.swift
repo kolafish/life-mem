@@ -352,6 +352,7 @@ struct PhotoVoiceEditor: View {
                     guard !attachment.hidden else { throw VisitCorrection.Failure.sourceUnavailable }
                 } else { throw VisitCorrection.Failure.sourceUnavailable }
                 let text = draft.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                if attachment.taken == nil { attachment.taken = photo.taken }
                 attachment.setVoice(audio: remove ? nil : draft.audio, duration: remove ? nil : draft.duration,
                                     transcript: remove || text.isEmpty ? nil : text)
             }

@@ -229,6 +229,22 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(updated.exists)
     }
 
+    func testJournalKeepsVoicesWhenSharedAssetIsUnavailable() {
+        let app = launch(fixture: "voice-day")
+        app.buttons["open-journal"].tap()
+        let controls = app.buttons.matching(identifier: "memo-play")
+        let first = controls.element(boundBy: 0)
+        let second = controls.element(boundBy: 1)
+        scrollTo(second, in: app)
+        XCTAssertTrue(first.isHittable && second.isHittable)
+        first.tap()
+        XCTAssertTrue(first.label.contains("停止播放"))
+        XCTAssertTrue(second.label.contains("播放原声"))
+        second.tap()
+        XCTAssertTrue(second.label.contains("停止播放"))
+        XCTAssertTrue(first.label.contains("播放原声"))
+    }
+
     func testEmptyJournalAndRouteWithoutPhotos() {
         let app = launch(fixture: "empty")
         app.buttons["open-journal"].tap()
@@ -274,6 +290,13 @@ final class ReviewUITests: XCTestCase {
         photos.firstMatch.tap()
         app.buttons["照片选项"].tap()
         app.buttons["从记录中隐藏"].tap()
+        let confirmation = app.alerts["隐藏照片并移除留言？"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["查看语音留言"].exists)
+        app.buttons["照片选项"].tap()
+        app.buttons["从记录中隐藏"].tap()
+        confirmation.buttons["隐藏并移除留言"].tap()
         let remaining = NSPredicate { _, _ in photos.count == 1 }
         expectation(for: remaining, evaluatedWith: app)
         waitForExpectations(timeout: 8)

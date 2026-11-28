@@ -101,7 +101,8 @@ struct GalleryPhoto: Identifiable {
         var result: [GalleryPhoto] = attachments.compactMap { item in
             guard !item.hidden else { return nil }
             if item.thumbnail != nil { return GalleryPhoto(saved: item) }
-            guard let id = item.assetID, let asset = library?.available[id] else { return nil }
+            let asset = item.assetID.flatMap { library?.available[$0] }
+            guard asset != nil || item.voiceDuration != nil else { return nil }
             return GalleryPhoto(saved: item, asset: asset)
         }
         if let key, let assets = library?.matches[key] {
@@ -246,6 +247,7 @@ private struct MemoryPhotoViewer: View {
     @State private var closeAfterMove = false
     @State private var failure: String?
     @State private var voicePhoto: GalleryPhoto?
+    @State private var confirmHide: GalleryPhoto?
 
     init(entry: RouteReviewEntry, photos: [GalleryPhoto], first: GalleryPhoto, onMap: @escaping (PhotoMapRequest) -> Void) {
         self.entry = entry
@@ -291,14 +293,20 @@ private struct MemoryPhotoViewer: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("移到其他记录") { moving = true }
-                        Button("从记录中隐藏") { change(to: nil) }
+                        Button("从记录中隐藏") {
+                            guard let current = photos.first(where: { $0.id == selection }) else { return }
+                            if current.saved?.voiceDuration != nil { confirmHide = current }
+                            else { change(current, to: nil) }
+                        }
                     } label: { Label("照片选项", systemImage: "ellipsis.circle") }
                 }
             }
             .sheet(isPresented: $moving, onDismiss: { if closeAfterMove { dismiss() } }) {
                 NavigationStack {
                     List(actions.entries.filter { $0.memoryKey != nil && $0.memoryKey != entry.memoryKey }) { other in
-                        Button { change(to: other.memoryKey) } label: {
+                        Button {
+                            if let current = photos.first(where: { $0.id == selection }) { change(current, to: other.memoryKey) }
+                        } label: {
                             ReviewTextRow(title: actions.name(other), detail: clockRange(other.startedAt, other.endedAt))
                         }
                     }
@@ -311,6 +319,11 @@ private struct MemoryPhotoViewer: View {
                     .toolbar { Button("取消") { moving = false } }
                 }
             }
+            .alert("隐藏照片并移除留言？", isPresented: Binding(get: { confirmHide != nil }, set: { if !$0 { confirmHide = nil } }),
+                   presenting: confirmHide) { photo in
+                Button("取消", role: .cancel) {}
+                Button("隐藏并移除留言", role: .destructive) { change(photo, to: nil) }
+            } message: { _ in Text("这张照片会从记录中隐藏，随照片保存的原声和转写将永久删除。") }
             .sheet(item: $voicePhoto) { photo in
                 if let key = entry.memoryKey { PhotoVoiceEditor(photo: photo, key: key) }
             }
@@ -320,8 +333,8 @@ private struct MemoryPhotoViewer: View {
         }
     }
 
-    private func change(to target: RouteMemoryKey?) {
-        guard let selected = photos.first(where: { $0.id == selection }), let key = target ?? entry.memoryKey else { return }
+    private func change(_ selected: GalleryPhoto, to target: RouteMemoryKey?) {
+        guard let key = target ?? entry.memoryKey else { return }
         do {
             try key.update(in: context.container) { destination, writer in
                 let photo: MemoryPhoto
