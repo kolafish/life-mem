@@ -9,6 +9,7 @@ struct RouteChecks {
         checkNoteTranscripts()
         checkWeeklyVisits()
         try checkVisitCandidates()
+        try checkTodayPlaceStays()
         try checkAutomaticTrips()
         try checkDrivingStops()
         try checkLegacyDrivingEdges()
@@ -1707,6 +1708,65 @@ struct RouteChecks {
         precondition(recall[firstVisit.id]?.previous == nil && recall[laterVisit.id]?.previous?.id == firstVisit.id)
         let all = RoutePlace.group(edited.places[0].visits + confirmed.places[0].visits, within: 100)
         precondition(all.count == 2)
+    }
+
+    @MainActor
+    private static func checkTodayPlaceStays() throws {
+        let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self,
+                                       configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let names = RoutePlaceNames(file: directory.appending(path: "places"))
+        try names.save("测试之家", for: .init(latitude: 0, longitude: 0))
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: .now)
+        let session = day.addingTimeInterval(3600)
+        let now = day.addingTimeInterval(16 * 3600)
+        var routes = [RecordedRoute]()
+        func record(_ hour: Int, _ xs: [Double], legacy: Bool = false) -> RecordedRoute {
+            let route = RecordedRoute(startedAt: day.addingTimeInterval(Double(hour * 3600)))
+            route.isAutomatic = true
+            route.isFinished = true
+            if !legacy { route.endedAtRest = true; route.automaticSessionStart = session }
+            store.mainContext.insert(route)
+            for (i, x) in xs.enumerated() {
+                let fix = location(longitude: x, at: route.startedAt.addingTimeInterval(Double(i * 60)))
+                store.mainContext.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: i == 0, route: route))
+                route.pointCount += 1
+            }
+            routes.insert(route, at: 0)
+            return route
+        }
+        func stays(_ active: Date? = nil, on date: Date? = nil) -> [TodayPlaceStay] {
+            RouteReviewCache().today(routes: routes, now: date ?? now, calendar: calendar,
+                                                           places: names.snapshot, activeSession: active).stays
+        }
+        let arrival = record(7, [0.005, 0], legacy: true)
+        let arrived = arrival.startedAt.addingTimeInterval(60)
+        _ = record(8, [0.0001, 0.0003, 0])
+        let local = record(10, [0, -0.0002, 0])
+        let seen = local.startedAt.addingTimeInterval(120)
+        try store.mainContext.save()
+        let open = stays(session)
+        precondition(open.count == 1 && open[0].startedAt == arrived && open[0].end == nil && open[0].name == "测试之家")
+        precondition(stays().first?.end == seen && stays(now).first?.end == seen)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: day)!
+        let overnight = stays(session, on: tomorrow)
+        precondition(overnight.count == 1 && overnight[0].startedAt == arrived && overnight[0].end == nil)
+        let review = RouteReview(routes: routes, calendar: calendar)
+        precondition(review.days.flatMap(\.stays).isEmpty && review.places.isEmpty)
+        // Both endpoints are at home, but the interior point proves an actual outing.
+        let outing = record(12, [0, 0.004, 0])
+        var projected = stays(session)
+        precondition(projected.count == 2 && projected[0].startedAt == arrived && projected[0].end == outing.startedAt)
+        precondition(projected[1].startedAt == outing.startedAt.addingTimeInterval(120) && projected[1].end == nil)
+        // A new session already away cannot supply the departure time for the prior one.
+        outing.automaticSessionStart = outing.startedAt
+        projected = stays(outing.startedAt)
+        precondition(projected.first?.end == seen)
+        outing.isAutomatic = false
+        precondition(stays(session).allSatisfy { $0.end != nil })
     }
 
     @MainActor

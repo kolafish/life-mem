@@ -28,6 +28,7 @@ struct RouteReviewRevision: Hashable, Sendable {
 
 @MainActor
 final class RouteReviewCache {
+    private var keepsTodaySlices = false
     private var revision: RouteReviewRevision?
     private var contributionCalendar: Calendar?
     private var contributions: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
@@ -41,7 +42,7 @@ final class RouteReviewCache {
 
         var retained: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
         let ordered = zip(routes, current.routes).map { route, version in
-            let value = contributions[version] ?? RouteReview.contribution(for: route, calendar: current.calendar)
+            let value = contributions[version] ?? RouteReview.contribution(for: route, calendar: current.calendar, keepsTodaySlices: keepsTodaySlices)
             retained[version] = value
             return value
         }
@@ -82,6 +83,25 @@ final class RouteReviewCache {
         return review(routes: includingPredecessors(of: subset, in: routes, calendar: calendar), calendar: calendar)
     }
 
+    func today(routes: [RecordedRoute], now: Date, calendar: Calendar, places: RoutePlaceSnapshot,
+               activeSession: Date?) -> (review: RouteReview, stays: [TodayPlaceStay]) {
+        if !keepsTodaySlices {
+            keepsTodaySlices = true
+            contributions.removeAll()
+            revision = nil
+        }
+        let review = day(routes: routes, containing: now, calendar: calendar)
+        var slices = Dictionary(uniqueKeysWithValues: contributions.map { ($0.key.id, $0.value.todaySlices) })
+        let stays = TodayPlaceStay.project(routes: routes, now: now, calendar: calendar, places: places,
+                                           activeSession: activeSession) { route in
+            if let cached = slices[route.id] { return cached }
+            let earlier = RouteReview.contribution(for: route, calendar: calendar, keepsTodaySlices: true).todaySlices
+            slices[route.id] = earlier
+            return earlier
+        }
+        return (review, stays)
+    }
+
     func detail(for route: RecordedRoute, among routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
         let source = RouteReview.contribution(for: route, calendar: calendar)
         guard route.previousAutomaticRouteID != nil else {
@@ -101,7 +121,7 @@ final class RouteReviewCache {
             let version = RouteReviewRevision.RouteVersion(id: route.id, pointCount: route.pointCount, visitRevision: route.visitRevision,
                                                          endedAtRest: route.endedAtRest, isAutomatic: route.isAutomatic)
             if let existing = contributions[version] { return existing.boundary }
-            let result = RouteReview.contribution(for: route, calendar: calendar)
+            let result = RouteReview.contribution(for: route, calendar: calendar, keepsTodaySlices: keepsTodaySlices)
             contributions[version] = result
             return result.boundary
         }
@@ -129,7 +149,7 @@ final class RouteReviewCache {
         return zip(routes, revision.routes).reduce(into: indexed) { records, pair in
             let (route, version) = pair
             guard records[version] == nil else { return }
-            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar)
+            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar, keepsTodaySlices: keepsTodaySlices)
             contributions[version] = contribution
             records[version] = contribution.summary
         }
@@ -143,7 +163,7 @@ final class RouteReviewCache {
         selectCalendar(revision.calendar)
         return zip(routes, revision.routes).flatMap { route, version in
             if let indexed = indexed[version] { return indexed.visits }
-            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar)
+            let contribution = contributions[version] ?? RouteReview.contribution(for: route, calendar: revision.calendar, keepsTodaySlices: keepsTodaySlices)
             contributions[version] = contribution
             return contribution.visits
         }
@@ -165,6 +185,7 @@ struct RouteReview {
     let journeys: [RouteJourney]
 
     fileprivate struct Contribution {
+        var todaySlices: [SegmentBuilder.Slice<PersistentIdentifier>] = []
         var boundary: AutomaticVisitBoundary?
         var entriesByDay: [Date: [RouteReviewEntry]] = [:]
         var visits: [RouteVisit] = []
@@ -240,7 +261,8 @@ struct RouteReview {
         contribution(for: route, calendar: calendar).summary
     }
 
-    fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
+    fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar,
+                                         keepsTodaySlices: Bool = false) -> Contribution {
         var contribution = Contribution()
         lazy var annotated = route.annotatedObservations()
         let points = route.points
@@ -249,6 +271,7 @@ struct RouteReview {
         })
         let runs = SegmentBuilder.build(points.map(\.locationPoint), automatic: route.isAutomatic == true,
                                         namedVisitStarts: Set(edits.keys))
+        if keepsTodaySlices, route.isAutomatic == true { contribution.todaySlices = runs.flatMap { $0 } }
         if route.isAutomatic == true, let session = route.automaticSessionStart,
            let first = runs.first?.first, let last = runs.last?.last,
            let start = first.points.first, let end = last.points.last {
@@ -577,5 +600,115 @@ struct ConfirmedVisitEdges {
             updated.arrivalStay = .init(coordinate: visit.coordinate, time: visit.startedAt)
         }
         return updated
+    }
+}
+
+/// A Today-only inference. The archive continues to own every observation and editable entry.
+struct TodayPlaceStay: Identifiable {
+    var id: Date { startedAt }
+    private(set) var startedAt: Date
+    let name: String?
+    var end: Date?
+    private let center: CLLocationCoordinate2D
+    private var lastSeen: Date
+    private let session: Date?
+
+    private func contains(_ point: LocationPoint<PersistentIdentifier>, places: RoutePlaceSnapshot) -> Bool {
+        guard center.location.distance(from: point.fix) <= RouteReview.placeRadius else { return false }
+        if let other = places.savedPlace(near: point.coordinate) {
+            return other.center.latitude == center.latitude && other.center.longitude == center.longitude
+        }
+        return name == nil
+    }
+
+    private mutating func observe(_ run: ArraySlice<LocationPoint<PersistentIdentifier>>,
+                                  places: RoutePlaceSnapshot) -> Bool {
+        let nearby = run.prefix { contains($0, places: places) }
+        if let last = nearby.last { lastSeen = last.timestamp }
+        return nearby.endIndex == run.endIndex
+    }
+
+    private init?(run: ArraySlice<LocationPoint<PersistentIdentifier>>, places: RoutePlaceSnapshot,
+                  session: Date?, stopped: Bool, legacyEnd: Bool) {
+        guard let first = run.first, let last = run.last else { return nil }
+        let place = places.savedPlace(near: last.coordinate)
+        guard stopped || (legacyEnd && place != nil) else { return nil }
+        self.session = session
+        name = place?.name
+        center = place?.center ?? last.coordinate
+        lastSeen = last.timestamp
+        startedAt = last.timestamp
+        if run.allSatisfy({ contains($0, places: places) }) { startedAt = first.timestamp }
+    }
+
+    @MainActor fileprivate static func project(
+        routes: [RecordedRoute], now: Date, calendar: Calendar, places: RoutePlaceSnapshot, activeSession: Date?,
+        slicesFor: (RecordedRoute) -> [SegmentBuilder.Slice<PersistentIdentifier>]
+    ) -> [Self] {
+        let midnight = calendar.startOfDay(for: now)
+        var result: [Self] = []
+        var pending: Self?
+
+        func finish() {
+            if var stay = pending, stay.lastSeen >= midnight,
+               stay.lastSeen.timeIntervalSince(stay.startedAt) >= AutomaticTrips.shortStop {
+                stay.end = stay.lastSeen
+                result.append(stay)
+            }
+            pending = nil
+        }
+
+        // Follow same-place recordings back past midnight to find the original arrival.
+        let current = routes.prefix { $0.startedAt >= midnight }
+        var relevant = Array(current)
+        var overnightPlace: Self?
+        for route in routes.dropFirst(current.count) {
+            guard route.isAutomatic == true else { break }
+            let slices = slicesFor(route)
+            guard let tail = slices.last?.points.suffix(1) else { break }
+            if overnightPlace == nil {
+                overnightPlace = Self(run: tail, places: places, session: route.automaticSessionStart,
+                                      stopped: true, legacyEnd: false)
+            }
+            guard let overnightPlace else { break }
+            if let session = overnightPlace.session, route.startedAt < session { break }
+            relevant.append(route)
+            if route.arrivalDecision == "ignored" || !slices.allSatisfy({ slice in
+                slice.points.allSatisfy { overnightPlace.contains($0, places: places) }
+            }) { break }
+        }
+        for route in relevant.reversed() {
+            guard route.isAutomatic == true else { finish(); continue }
+            // Early automatic routes predate the session field. Link only when their time is
+            // covered by the same switch-on as the next recording.
+            if let previous = pending, let session = route.automaticSessionStart,
+               previous.session.map({ $0 != session }) ?? (previous.startedAt < session) {
+                finish()
+            }
+            if route.arrivalDecision == "ignored" { finish() }
+            let slices = slicesFor(route)
+            for (index, slice) in slices.enumerated() {
+                let points = slice.points
+                var start = points.startIndex
+                while start < points.endIndex {
+                    let next = points[(start + 1)...].firstIndex { $0.startsRecordingRun == true } ?? points.endIndex
+                    let run = points[start..<next]
+                    if pending?.observe(run, places: places) == false { finish() }
+                    if pending == nil {
+                        let final = index == slices.count - 1 && next == points.endIndex
+                        let pausedHere = next < points.endIndex && run.last?.mode == .stationary
+                        pending = Self(run: run, places: places, session: route.automaticSessionStart,
+                                       stopped: slice.visitCoordinate != nil || pausedHere || (final && route.endedAtRest == true),
+                                       legacyEnd: final && route.isFinished && route.endedAtRest == nil)
+                    }
+                    start = next
+                }
+            }
+        }
+        if let stay = pending, let activeSession, stay.startedAt >= activeSession,
+           stay.session == nil || stay.session == activeSession, stay.lastSeen <= now {
+            result.append(stay)
+        } else { finish() }
+        return result
     }
 }

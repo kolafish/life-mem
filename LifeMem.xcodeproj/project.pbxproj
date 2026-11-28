@@ -314,7 +314,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 41;
+				CURRENT_PROJECT_VERSION = 44;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
@@ -333,7 +333,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 41;
+				CURRENT_PROJECT_VERSION = 44;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
