@@ -52,6 +52,12 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(office.waitForExistence(timeout: 5))
         office.tap()
         XCTAssertTrue(app.staticTexts["到访记录"].waitForExistence(timeout: 5))
+        let preview = app.buttons["place-map-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.28)).tap()
+        XCTAssertTrue(app.buttons["返回地点"].waitForExistence(timeout: 5))
+        app.buttons["返回地点"].tap()
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
     }
 
     func testPreviousVisitOpensSourceFromToday() {
@@ -109,10 +115,20 @@ final class ReviewUITests: XCTestCase {
         day.tap()
         XCTAssertTrue(app.staticTexts["当日概览"].waitForExistence(timeout: 8), app.debugDescription)
 
+        let preview = app.buttons["day-map-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(preview.frame.height, 160)
+        XCTAssertFalse(app.buttons["展开地图"].exists)
+        let blankMap = CGVector(dx: 0.78, dy: 0.22)
+        preview.coordinate(withNormalizedOffset: blankMap).tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
         let marker = app.buttons.matching(identifier: "stay-marker")
             .matching(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
-        for _ in 0..<4 where !marker.isHittable { app.swipeUp() }
-        XCTAssertTrue(marker.isHittable, app.debugDescription)
+        XCTAssertTrue(marker.waitForExistence(timeout: 5), app.debugDescription)
+        let overview = XCTAttachment(screenshot: app.screenshot())
+        overview.name = "Full-screen route with named stops"
+        overview.lifetime = .keepAlways
+        add(overview)
         marker.tap()
         let reset = app.buttons["显示全天"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
@@ -126,22 +142,26 @@ final class ReviewUITests: XCTestCase {
         reset.tap()
         XCTAssertFalse(reset.exists)
 
-        app.buttons["展开地图"].tap()
+        preview.coordinate(withNormalizedOffset: blankMap).tap()
         let map = app.descendants(matching: .any).matching(identifier: "daily-route-map").firstMatch
         map.swipeLeft()
         XCTAssertTrue(reset.isEnabled)
         reset.tap()
         app.buttons["返回时间线"].tap()
 
-        let home = app.buttons.matching(identifier: "timeline-entry")
-            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试之家", "→")).firstMatch
-        XCTAssertTrue(revealTimelineControl(home, in: app), app.debugDescription)
-        home.tap()
-        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons["展开地图"].tap()
+        let office = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试办公室", "→")).firstMatch
+        XCTAssertTrue(revealTimelineControl(office, in: app), app.debugDescription)
+        office.tap()
+        XCTAssertTrue(office.isSelected, app.debugDescription)
+        let chosen = office.label
+        preview.coordinate(withNormalizedOffset: blankMap).tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+        let card = app.buttons.matching(identifier: "timeline-entry").firstMatch
+        XCTAssertEqual(card.label, chosen)
         app.buttons["返回时间线"].tap()
-        XCTAssertTrue(home.isHittable)
-        XCTAssertTrue(home.isSelected)
+        XCTAssertTrue(office.isHittable)
+        XCTAssertTrue(office.isSelected, app.debugDescription)
     }
 
     #if targetEnvironment(simulator)
@@ -269,6 +289,15 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(days.element(boundBy: 1).waitForExistence(timeout: 8))
         for index in 0...1 {
             days.element(boundBy: index).tap()
+            let preview = app.buttons["day-map-preview"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 5))
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.16)).tap()
+            XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+            for name in ["起点", "终点"] {
+                let pin = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+                XCTAssertTrue(pin.waitForExistence(timeout: 5), app.debugDescription)
+            }
+            app.buttons["返回时间线"].tap()
             let walk = app.buttons.matching(identifier: "timeline-entry")
                 .matching(NSPredicate(format: "label CONTAINS %@", "步行")).firstMatch
             scrollTo(walk, in: app, horizontalOffset: 0.98)
