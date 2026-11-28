@@ -256,7 +256,15 @@ struct RouteChecks {
         precondition(NoteTranscript.join("午后", "散步") == "午后散步" && NoteTranscript.join("River", "walk") == "River walk")
         var repeated = NoteTranscript()
         precondition(repeated.update("好", range: 0..<1, settled: true) == "好")
+        precondition(repeated.update("好想再来", range: nil, settled: false) == "好好想再来")
         precondition(repeated.update("好", range: 3..<4, settled: true) == "好好")
+        precondition(repeated.update("好想再来", range: nil, settled: false) == "好好好想再来")
+        var interrupted = NoteTranscript()
+        _ = interrupted.update("出发。", range: 0.3..<1, settled: true)
+        _ = interrupted.update("好", range: 3..<4, settled: true)
+        precondition(interrupted.update("好", range: nil, settled: true) == "出发。好")
+        precondition(interrupted.update("好想再来", range: nil, settled: false) == "出发。好好想再来")
+        precondition(interrupted.update("好想再来", range: nil, settled: true) == "出发。好好想再来")
     }
 
     private static func checkMapProjection() {

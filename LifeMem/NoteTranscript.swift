@@ -7,24 +7,31 @@ struct NoteTranscript {
     }
 
     private var phrases: [Phrase] = []
+    private var reportsCumulativeText = false
+    private var lastUpdate: (words: String, display: String)?
 
     // Timed results can revise an earlier phrase or start a new one after a pause.
     // Untimed hypotheses are previews. Only settled, timed phrases are kept.
     mutating func update(_ text: String, range: Range<TimeInterval>?, settled: Bool) -> String {
+        if range == nil, settled, let lastUpdate, lastUpdate.words == text { return lastUpdate.display }
         let previous: ArraySlice<Phrase>
         if let range {
             previous = phrases.prefix { $0.range.upperBound <= range.lowerBound + 0.05 && $0.range.lowerBound < range.lowerBound }
+        } else if reportsCumulativeText, let first = phrases.first, text.hasPrefix(first.text) {
+            previous = phrases.prefix(0)
         } else {
-            // Older recognizers may keep reporting the whole task instead of just the current utterance.
-            let cumulative = phrases.indices.first { index in
-                text.hasPrefix(phrases[index...].reduce("") { Self.join($0, $1.text) })
-            }
-            previous = phrases.prefix(upTo: cumulative ?? phrases.endIndex)
+            // An untimed preview after a pause can start with exactly the same words as the previous phrase.
+            previous = phrases[...]
         }
         if settled, let range {
+            let replaced = phrases.count - previous.count
+            if replaced > 1 { reportsCumulativeText = true }
+            if replaced == 0 && !previous.isEmpty { reportsCumulativeText = false }
             phrases = Array(previous) + [Phrase(text: text, range: range)]
         }
-        return Self.join(previous.reduce("") { Self.join($0, $1.text) }, text)
+        let display = Self.join(previous.reduce("") { Self.join($0, $1.text) }, text)
+        lastUpdate = (text, display)
+        return display
     }
 
     static func join(_ prefix: String, _ words: String) -> String {
