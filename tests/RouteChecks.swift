@@ -235,6 +235,12 @@ struct RouteChecks {
         precondition(allDay.memoryKey(forPhotoAt: time.addingTimeInterval(3600), coordinate: near)?.owner == later.id)
         precondition(allDay.placement(forPhotoAt: time.addingTimeInterval(3600), coordinate: near, in: day) == .outsideDetail)
         precondition(ambiguous.placement(forPhotoAt: time, coordinate: near, in: day) == .pending)
+        let midnight = Calendar.current.startOfDay(for: start)
+        let early = insertRoute(context: context, start: midnight.addingTimeInterval(-32), samples: [(0, 0, .walking, true), (64, 0.001, .walking, false)])
+        let late = insertRoute(context: context, start: midnight.addingTimeInterval(-20), samples: [(0, 1, .walking, true), (40, 1.001, .walking, false)])
+        try context.save()
+        let overnight = RouteReviewCache().day(routes: [late, early], containing: midnight, calendar: .current).days[0]
+        precondition(overnight.entries.count == 2 && overnight.memoryKey(forPhotoAt: midnight.addingTimeInterval(8), coordinate: near) == nil)
     }
 
     private static func checkMapProjection() {
