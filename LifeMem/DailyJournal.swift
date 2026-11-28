@@ -53,19 +53,21 @@ private struct DailyJournal: View {
                         .padding(.top, 2)
                 }.padding(.bottom, 24)
                 ForEach(day.entries) { entry in
-                    VStack(alignment: .leading, spacing: 7) {
-                        Divider()
-                        Text(clockRange(entry.startedAt, entry.endedAt))
-                            .font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
-                            .padding(.top, 10)
-                        Text(day.title(for: entry) { resolver.label(near: $0, names: names) })
-                            .font(.system(.title3, design: .serif, weight: .semibold))
-                            .accessibilityAddTraits(.isHeader)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Divider()
+                            Text(clockRange(entry.startedAt, entry.endedAt))
+                                .font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
+                                .padding(.top, 10)
+                            Text(day.title(for: entry) { resolver.label(near: $0, names: names) })
+                                .font(.system(.title3, design: .serif, weight: .semibold))
+                                .accessibilityAddTraits(.isHeader)
+                        }
+                        if let key = entry.memoryKey {
+                            JournalMemories(key: key, day: day.date, dates: dates[key] ?? [day.date], playback: playback)
+                        }
                     }
-                    if let key = entry.memoryKey {
-                        JournalMemories(key: key, day: day.date, dates: dates[key] ?? [day.date], playback: playback)
-                    }
-                    Color.clear.frame(height: 18).accessibilityHidden(true)
+                    .padding(.bottom, 18)
                 }
             }
             .padding(.horizontal, 22).padding(.vertical, 20)
@@ -104,7 +106,7 @@ private struct JournalMemories: View {
             Text(text).font(.body).lineSpacing(5).textSelection(.enabled).padding(.top, 8)
         }
         let photos = GalleryPhoto.visible(attachments: attachments, key: key, libraryContext: library)
-        ForEach(photos.filter { RouteReviewDay.journalDay(for: $0.taken, on: dates, calendar: calendar) == day }) { photo in
+        ForEach(photos.filter { RouteReviewDay.journalDay(for: $0.taken, on: dates, calendar: calendar) == day }, id: \.journalID) { photo in
             VStack(alignment: .leading, spacing: 4) {
                 Button {
                     playback.stop()
@@ -131,6 +133,8 @@ private struct JournalMemories: View {
 }
 
 private extension GalleryPhoto {
+    var journalID: String { saved?.id.uuidString ?? id }
+
     @ViewBuilder var journalImage: some View {
         if let asset {
             let ratio = CGFloat(asset.pixelWidth) / CGFloat(max(1, asset.pixelHeight))
