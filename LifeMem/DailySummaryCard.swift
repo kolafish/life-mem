@@ -3,7 +3,6 @@ import SwiftUI
 struct DailySummaryCard: View {
     let day: RouteReviewDay
 
-    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(RoutePlaceNames.self) private var placeNames
 
     var body: some View {
@@ -13,20 +12,13 @@ struct DailySummaryCard: View {
             if let start = day.entries.first?.startedAt, let end = day.entries.map(\.endedAt).max() {
                 metric("记录跨度", clockRange(start, end), symbol: "clock")
             }
-            if typeSize.isAccessibilitySize {
-                VStack(spacing: 8) { movementMetrics }
-            } else {
-                HStack(spacing: 8) { movementMetrics }
+            HStack(spacing: 8) {
+                metric("移动里程", routeDistance(day.movingDistanceMeters), symbol: "point.topleft.down.to.point.bottomright.curvepath")
+                metric("移动耗时", routeDuration(day.movingDuration), symbol: "timer")
             }
             stayDistribution
         }
         .padding(.top, 8)
-    }
-
-    @ViewBuilder
-    private var movementMetrics: some View {
-        metric("移动里程", routeDistance(day.movingDistanceMeters), symbol: "point.topleft.down.to.point.bottomright.curvepath")
-        metric("移动耗时", routeDuration(day.movingDuration), symbol: "timer")
     }
 
     private func metric(_ title: String, _ value: String, symbol: String) -> some View {
