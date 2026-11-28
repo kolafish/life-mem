@@ -77,12 +77,43 @@ private struct ImportedImage: Transferable {
     }
 }
 
+private struct GalleryPhoto: Identifiable {
+    let id: String
+    let saved: MemoryPhoto?
+    let asset: PHAsset?
+
+    init(saved: MemoryPhoto, asset: PHAsset? = nil) {
+        id = saved.id.uuidString
+        self.saved = saved
+        self.asset = asset
+    }
+
+    init(asset: PHAsset) {
+        id = asset.localIdentifier
+        self.asset = asset
+        saved = nil
+    }
+    var taken: Date? { saved?.taken ?? asset?.creationDate }
+    var coordinate: CLLocationCoordinate2D? { saved?.coordinate ?? asset?.location?.coordinate }
+
+    @ViewBuilder func image(full: Bool, fitPreview: Bool = false) -> some View {
+        if let asset { LibraryImage(asset: asset, fullSize: full, fitPreview: fitPreview) }
+        else if let data = full ? saved?.image : saved?.thumbnail, let image = UIImage(data: data) {
+            GeometryReader { area in
+                Image(uiImage: image).resizable().aspectRatio(contentMode: full || fitPreview ? .fit : .fill)
+                    .frame(width: area.size.width, height: area.size.height).clipped()
+            }
+        } else { ContentUnavailableView("照片不可用", systemImage: "photo") }
+    }
+}
+
 struct EntryPhotosView: View {
     @Environment(\.dayPhotoActions) private var actions
+    @Environment(\.dayLibrary) private var libraryContext
     let entry: RouteReviewEntry
     @Query private var attachments: [MemoryPhoto]
     let selected: Bool
-    @State private var viewing: MemoryPhoto?
+    @State private var viewing: GalleryPhoto?
     @State private var mapRequest: PhotoMapRequest?
 
     init(entry: RouteReviewEntry, key: RouteMemoryKey, selected: Bool) {
@@ -92,8 +123,17 @@ struct EntryPhotosView: View {
         _attachments = Query(filter: #Predicate<MemoryPhoto> { !$0.hidden && $0.memory?.key == value })
     }
 
-    private var photos: [MemoryPhoto] {
-        attachments.sorted { ($0.taken ?? $0.added) < ($1.taken ?? $1.added) }
+    private var photos: [GalleryPhoto] {
+        let library = libraryContext.library
+        var result: [GalleryPhoto] = attachments.compactMap { item in
+            if item.thumbnail != nil { return GalleryPhoto(saved: item) }
+            guard let id = item.assetID, let asset = library?.available[id] else { return nil }
+            return GalleryPhoto(saved: item, asset: asset)
+        }
+        if let key = entry.memoryKey, let assets = library?.matches[key] {
+            result += assets.filter { !libraryContext.excluded.contains($0.localIdentifier) }.map { GalleryPhoto(asset: $0) }
+        }
+        return result.sorted { ($0.taken ?? $0.saved?.added ?? .distantPast) < ($1.taken ?? $1.saved?.added ?? .distantPast) }
     }
 
     var body: some View {
@@ -102,11 +142,7 @@ struct EntryPhotosView: View {
                 HStack(spacing: 5) {
                     ForEach(Array(photos.prefix(3))) { photo in
                         Button { viewing = photo } label: {
-                            GeometryReader { area in
-                                if let data = photo.thumbnail, let image = UIImage(data: data) {
-                                    Image(uiImage: image).resizable().scaledToFill().frame(width: area.size.width, height: area.size.height).clipped()
-                                }
-                            }
+                            photo.image(full: false)
                             .frame(height: 78)
                             .clipShape(.rect(cornerRadius: 9))
                             .overlay(alignment: .bottomTrailing) {
@@ -198,14 +234,14 @@ private struct MemoryPhotoViewer: View {
     @Environment(\.dayPhotoActions) private var actions
     @Environment(\.dismiss) private var dismiss
     let entry: RouteReviewEntry
-    let photos: [MemoryPhoto]
+    let photos: [GalleryPhoto]
     let onMap: (PhotoMapRequest) -> Void
-    @State private var selection: UUID
+    @State private var selection: String
     @State private var moving = false
     @State private var closeAfterMove = false
     @State private var failed = false
 
-    init(entry: RouteReviewEntry, photos: [MemoryPhoto], first: MemoryPhoto, onMap: @escaping (PhotoMapRequest) -> Void) {
+    init(entry: RouteReviewEntry, photos: [GalleryPhoto], first: GalleryPhoto, onMap: @escaping (PhotoMapRequest) -> Void) {
         self.entry = entry
         self.photos = photos
         self.onMap = onMap
@@ -218,9 +254,7 @@ private struct MemoryPhotoViewer: View {
                 TabView(selection: $selection) {
                     ForEach(photos) { item in
                         Group {
-                            if let data = item.id == selection ? item.image : item.thumbnail, let image = UIImage(data: data) {
-                                Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("照片")
-                            } else { ContentUnavailableView("照片不可用", systemImage: "photo") }
+                            item.image(full: item.id == selection, fitPreview: true).accessibilityLabel("照片")
                         }.tag(item.id)
                     }
                 }.tabViewStyle(.page(indexDisplayMode: .never))
@@ -232,6 +266,10 @@ private struct MemoryPhotoViewer: View {
                         onMap(.init(entryID: entry.id, coordinate: photo.coordinate))
                     }.frame(minHeight: 44)
                 }
+            }
+            .onChange(of: photos.map(\.id)) { _, ids in
+                guard !ids.contains(selection) else { return }
+                if let first = ids.first { selection = first } else { dismiss() }
             }
             .navigationTitle(actions.name(entry)).navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -265,13 +303,21 @@ private struct MemoryPhotoViewer: View {
 
     private func change(to target: RouteMemoryKey?) {
         guard let selected = photos.first(where: { $0.id == selection }), let key = target ?? entry.memoryKey else { return }
-        let id = selected.id
         do {
             try key.update(in: context.container) { destination, writer in
-                guard let photo = try writer.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.id == id })).first
-                else { throw VisitCorrection.Failure.sourceUnavailable }
-                if target != nil { try photo.move(to: destination, in: writer) }
-                else { photo.hide(in: writer) }
+                let photo: MemoryPhoto
+                if let saved = selected.saved {
+                    let id = saved.id
+                    guard let found = try writer.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.id == id })).first
+                    else { throw VisitCorrection.Failure.sourceUnavailable }
+                    photo = found
+                } else if let asset = selected.asset {
+                    photo = try destination.attachment(for: asset.localIdentifier, in: writer)
+                } else { throw VisitCorrection.Failure.sourceUnavailable }
+                if target != nil {
+                    photo.hidden = false
+                    try photo.move(to: destination, in: writer)
+                } else { photo.hide(in: writer) }
             }
             if moving { closeAfterMove = true; moving = false } else { dismiss() }
         } catch { failed = true }

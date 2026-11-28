@@ -59,6 +59,25 @@ struct RouteReviewDay: Identifiable {
     let date: Date
     let entries: [RouteReviewEntry]
 
+    func memoryKey(forPhotoAt time: Date, coordinate: CLLocationCoordinate2D?) -> RouteMemoryKey? {
+        var matched: RouteMemoryKey?
+        for entry in entries where entry.startedAt <= time && time <= entry.endedAt {
+            guard let key = entry.memoryKey else { continue }
+            let position: CLLocationCoordinate2D?
+            if let stay = entry.stay {
+                guard stay.isInferred != true && stay.isCandidate != true else { continue }
+                position = stay.coordinate
+            } else {
+                position = entry.segments.lazy.compactMap { $0.coordinate(at: time) }.first
+            }
+            guard let position else { continue }
+            if let coordinate, coordinate.location.distance(from: position.location) > 150 { continue }
+            if let matched, matched != key { return nil }
+            matched = key
+        }
+        return matched
+    }
+
     func title(for entry: RouteReviewEntry, named: (CLLocationCoordinate2D) -> String?) -> String {
         if let stay = entry.stay {
             let name = stay.visitName ?? named(stay.coordinate)

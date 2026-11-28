@@ -4,6 +4,8 @@
 <dict>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>开启手动或自动记录后，Life Mem 会在锁屏时继续使用位置，将路线保存在这台 iPhone 上。</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>允许后，Life Mem 在本机按拍摄时间和位置把可见照片关联到当天的停留与行程。</string>
     <key>NSMotionUsageDescription</key>
     <string>识别步行、乘车和静止，以调整路线记录的定位频率。</string>
     <key>UIBackgroundModes</key>

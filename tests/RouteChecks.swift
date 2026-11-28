@@ -93,6 +93,7 @@ struct RouteChecks {
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
         checkPureSegmentBuilder(at: start)
+        try checkPhotoMatching(context: context, start: start)
         try checkReview(context: context)
         try checkTripBoundaries(context: context, start: start)
         checkCoverageDates()
@@ -203,6 +204,27 @@ struct RouteChecks {
         }
         let after = try destination.memory(in: ModelContext(container))
         precondition(!after.isAnnotated && after.owner?.visitRevision != prior)
+    }
+
+    @MainActor
+    private static func checkPhotoMatching(context: ModelContext, start: Date) throws {
+        let samples: [Sample] = [(0, 0, .walking, true), (30, 0.0004, .walking, false),
+                                 (300, 0.002, .walking, true), (330, 0.0024, .walking, false)]
+        let route = insertRoute(context: context, start: start, samples: samples)
+        try context.save()
+        let day = RouteReview(routes: [route], calendar: .current).days[0]
+        let time = start.addingTimeInterval(15)
+        let near = CLLocationCoordinate2D(latitude: 0, longitude: 0.0002)
+        let far = CLLocationCoordinate2D(latitude: 1, longitude: 1)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: nil) != nil)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: near) != nil)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: far) == nil)
+        precondition(day.memoryKey(forPhotoAt: start.addingTimeInterval(100), coordinate: nil) == nil)
+        let second = insertRoute(context: context, start: start, samples: samples)
+        try context.save()
+        let overlap = RouteReview(routes: [route, second], calendar: .current).days[0]
+        precondition(overlap.memoryKey(forPhotoAt: time, coordinate: nil) == nil)
+        precondition(overlap.memoryKey(forPhotoAt: time, coordinate: near) == nil)
     }
 
     private static func checkMapProjection() {

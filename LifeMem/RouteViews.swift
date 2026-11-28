@@ -382,6 +382,9 @@ struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var photoLibrary = DayPhotoLibrary()
+    @AppStorage("matchDayPhotos") private var matchDayPhotos = false
+    @Query(filter: #Predicate<MemoryPhoto> { $0.assetID != nil }) private var photoDecisions: [MemoryPhoto]
     @State private var photoRequest: PhotoMapRequest?
     @State private var expandedMap = false
     @State private var scrollAfterMap: RouteReviewEntry.ID?
@@ -422,6 +425,7 @@ struct RouteDayReviewView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
                     DailySummaryCard(day: day)
+                    DayPhotoControls(enabled: $matchDayPhotos, library: photoLibrary)
                     Section {
                         ForEach(day.entries) { entry in
                             if entry.followsGap {
@@ -515,6 +519,14 @@ struct RouteDayReviewView: View {
             }
         }
         .environment(\.dayPhotoActions, photoActions)
+        .environment(\.dayLibrary, DayLibraryContext(library: photoLibrary, excluded: Set(photoDecisions.compactMap(\.assetID))))
+        .task(id: DayLibraryRevision(date: day.date, entries: day.entries.map {
+            .init(key: $0.memoryKey, start: $0.startedAt, end: $0.endedAt, segments: $0.segments.count)
+        }, enabled: matchDayPhotos, active: scenePhase == .active, revision: photoLibrary.revision)) {
+            if scenePhase == .active { await photoLibrary.refresh(day, enabled: matchDayPhotos) }
+            else { photoLibrary.observe(false) }
+        }
+        .onDisappear { photoLibrary.observe(false) }
         .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
