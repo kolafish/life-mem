@@ -93,6 +93,7 @@ struct RouteChecks {
         precondition(segments[2].startedAt == stayStart.timestamp && segments[2].endedAt == stayEnd.timestamp)
         precondition(segments[2].coordinates.count == 1)
         checkPureSegmentBuilder(at: start)
+        try checkPhotoMatching(context: context, start: start)
         try checkReview(context: context)
         try checkTripBoundaries(context: context, start: start)
         checkCoverageDates()
@@ -203,6 +204,43 @@ struct RouteChecks {
         }
         let after = try destination.memory(in: ModelContext(container))
         precondition(!after.isAnnotated && after.owner?.visitRevision != prior)
+    }
+
+    @MainActor
+    private static func checkPhotoMatching(context: ModelContext, start: Date) throws {
+        let samples: [Sample] = [(0, 0, .walking, true), (30, 0.0004, .walking, false),
+                                 (300, 0.002, .walking, true), (330, 0.0024, .walking, false)]
+        let route = insertRoute(context: context, start: start, samples: samples)
+        try context.save()
+        let day = RouteReview(routes: [route], calendar: .current).days[0]
+        let time = start.addingTimeInterval(15)
+        let near = CLLocationCoordinate2D(latitude: 0, longitude: 0.0002)
+        let far = CLLocationCoordinate2D(latitude: 1, longitude: 1)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: nil) != nil)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: near) != nil)
+        precondition(day.memoryKey(forPhotoAt: time, coordinate: far) == nil)
+        precondition(day.memoryKey(forPhotoAt: start.addingTimeInterval(100), coordinate: nil) == nil)
+        let second = insertRoute(context: context, start: start, samples: samples)
+        try context.save()
+        let overlap = RouteReview(routes: [route, second], calendar: .current).days[0]
+        precondition(overlap.memoryKey(forPhotoAt: time, coordinate: nil) == nil)
+        precondition(overlap.memoryKey(forPhotoAt: time, coordinate: near) == nil)
+        let distant = insertRoute(context: context, start: start, samples: [(0, 1, .walking, true), (30, 1.001, .walking, false)])
+        try context.save()
+        let ambiguous = RouteReview(routes: [route, distant], calendar: .current).days[0]
+        precondition(ambiguous.memoryKey(forPhotoAt: time, coordinate: near) == nil)
+        let later = insertRoute(context: context, start: start.addingTimeInterval(3600), samples: samples)
+        try context.save()
+        let allDay = RouteReviewCache().review(routes: [route, later], calendar: .current).days[0]
+        precondition(allDay.memoryKey(forPhotoAt: time.addingTimeInterval(3600), coordinate: near)?.owner == later.id)
+        precondition(allDay.placement(forPhotoAt: time.addingTimeInterval(3600), coordinate: near, in: day) == .outsideDetail)
+        precondition(ambiguous.placement(forPhotoAt: time, coordinate: near, in: day) == .pending)
+        let midnight = Calendar.current.startOfDay(for: start)
+        let early = insertRoute(context: context, start: midnight.addingTimeInterval(-32), samples: [(0, 0, .walking, true), (64, 0.001, .walking, false)])
+        let late = insertRoute(context: context, start: midnight.addingTimeInterval(-20), samples: [(0, 1, .walking, true), (40, 1.001, .walking, false)])
+        try context.save()
+        let overnight = RouteReviewCache().day(routes: [late, early], containing: midnight, calendar: .current).days[0]
+        precondition(overnight.entries.count == 2 && overnight.memoryKey(forPhotoAt: midnight.addingTimeInterval(8), coordinate: near) == nil)
     }
 
     private static func checkMapProjection() {
@@ -1594,7 +1632,14 @@ struct RouteChecks {
         }
         precondition(joined.days.flatMap(\.stays).map(\.duration) == [1_920])
         precondition(joinedIndex.days.flatMap(\.stays).map(\.duration) == [1_920])
-        let observedEntry = RouteReview(routes: [arriving], calendar: calendar).days.flatMap(\.entries).first { $0.kind == .visit }!
+        let mergedStay = joined.days.flatMap(\.entries).first { $0.stay?.isInferred == true }!
+        let captured = arriving.startedAt.addingTimeInterval(180)
+        precondition(joined.days[0].memoryKey(forPhotoAt: captured, coordinate: mergedStay.stay?.coordinate) == mergedStay.memoryKey)
+        let gap = arriving.startedAt.addingTimeInterval(1200)
+        precondition(joined.days[0].memoryKey(forPhotoAt: gap, coordinate: nil) == nil)
+        let rawDay = RouteReview(routes: [arriving], calendar: calendar).days[0]
+        let observedEntry = rawDay.entries.first { $0.kind == .visit }!
+        precondition(joined.days[0].placement(forPhotoAt: captured, coordinate: nil, in: rawDay) == .record(observedEntry.memoryKey!))
         try VisitCorrection.save(observedEntry.stay!, name: "Separate visit", in: context)
         let observedKey = observedEntry.memoryKey!
         try observedKey.update(in: container) { memory, _ in memory.text = "Window seat" }

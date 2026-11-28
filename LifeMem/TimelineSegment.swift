@@ -34,6 +34,7 @@ struct RouteReviewEntry: Identifiable {
     var endedAt: Date { stay?.endedAt ?? segments[segments.count - 1].endedAt }
 
     var memoryKey: RouteMemoryKey? = nil
+    var observedVisits: [RouteVisit] = []
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
@@ -58,6 +59,50 @@ struct RouteReviewDay: Identifiable {
 
     let date: Date
     let entries: [RouteReviewEntry]
+
+    enum PhotoPlacement: Equatable {
+        case record(RouteMemoryKey), pending, outsideDetail
+    }
+
+    func placement(forPhotoAt time: Date, coordinate: CLLocationCoordinate2D?, in detail: RouteReviewDay?) -> PhotoPlacement {
+        guard let canonical = memoryKey(forPhotoAt: time, coordinate: coordinate) else {
+            if let detail, !detail.entries.contains(where: { $0.startedAt <= time && time <= $0.endedAt }) { return .outsideDetail }
+            return .pending
+        }
+        guard let detail else { return .record(canonical) }
+        // A raw stop can be folded into a longer confirmed visit in the full day.
+        guard let visible = detail.memoryKey(forPhotoAt: time, coordinate: coordinate) else { return .outsideDetail }
+        if visible == canonical { return .record(visible) }
+        guard let rawID = detail.entries.first(where: { $0.memoryKey == visible })?.stay?.visitID,
+              entries.contains(where: { entry in
+                  entry.memoryKey == canonical && entry.observedVisits.contains { visit in
+                      visit.id == rawID && visit.startedAt <= time && time <= visit.endedAt
+                  }
+              }) else { return .outsideDetail }
+        return .record(visible)
+    }
+
+    func memoryKey(forPhotoAt time: Date, coordinate: CLLocationCoordinate2D?) -> RouteMemoryKey? {
+        var candidate: (key: RouteMemoryKey, position: CLLocationCoordinate2D)?
+        for entry in entries where entry.startedAt <= time && time <= entry.endedAt {
+            guard let key = entry.memoryKey else { continue }
+            let position: CLLocationCoordinate2D?
+            if let stay = entry.stay {
+                guard stay.isCandidate != true else { continue }
+                if stay.isInferred == true {
+                    position = entry.observedVisits.first { $0.startedAt <= time && time <= $0.endedAt }?.coordinate
+                } else { position = stay.coordinate }
+            } else {
+                position = entry.segments.lazy.compactMap { $0.coordinate(at: time) }.first
+            }
+            guard let position else { continue }
+            if let candidate, candidate.key != key { return nil }
+            candidate = (key, position)
+        }
+        guard let candidate else { return nil }
+        if let coordinate, coordinate.location.distance(from: candidate.position.location) > 150 { return nil }
+        return candidate.key
+    }
 
     func title(for entry: RouteReviewEntry, named: (CLLocationCoordinate2D) -> String?) -> String {
         if let stay = entry.stay {

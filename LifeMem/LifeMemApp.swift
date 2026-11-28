@@ -21,6 +21,7 @@ struct LifeMemApp: App {
     }
 
     private let storage: Result<AppStorage, Error>
+    private let preferences: UserDefaults
     @State private var placeNames: RoutePlaceNames
     @State private var placeResolver: PlaceResolver
 
@@ -33,6 +34,7 @@ struct LifeMemApp: App {
             preferences = isolated
         }
         #endif
+        self.preferences = preferences
         _placeNames = State(initialValue: names)
         let lookup: PlaceResolver.Lookup?
         #if DEBUG && targetEnvironment(simulator)
@@ -70,6 +72,7 @@ struct LifeMemApp: App {
             case let .success(store):
                 RootView(recorder: store.recorder, index: store.index)
                     .modelContainer(store.container)
+                    .defaultAppStorage(preferences)
                     .environment(placeNames)
                     .environment(placeResolver)
             case .failure:

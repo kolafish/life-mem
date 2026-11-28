@@ -26,6 +26,24 @@ struct ActivitySegment<ID: Hashable>: Identifiable {
     var lastCoordinate: CLLocationCoordinate2D { samples[samples.count - 1].coordinate }
     var coordinates: [CLLocationCoordinate2D] { mode == .stationary ? [startCoordinate] : samples.map(\.coordinate) }
 
+    func coordinate(at time: Date) -> CLLocationCoordinate2D? {
+        guard movementStartedAt <= time, time <= endedAt else { return nil }
+        var low = 0, high = samples.count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            if samples[mid].timestamp < time { low = mid + 1 } else { high = mid }
+        }
+        let end = samples[low]
+        if low == 0 || end.timestamp == time { return end.coordinate }
+        let start = samples[low - 1]
+        let duration = end.timestamp.timeIntervalSince(start.timestamp)
+        guard duration > 0, duration <= LocationSampling.maximumGap else { return nil }
+        let t = time.timeIntervalSince(start.timestamp) / duration
+        let delta = (end.coordinate.longitude - start.coordinate.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
+        let longitude = (start.coordinate.longitude + delta * t + 540).truncatingRemainder(dividingBy: 360) - 180
+        return .init(latitude: start.coordinate.latitude + t * (end.coordinate.latitude - start.coordinate.latitude), longitude: longitude)
+    }
+
     fileprivate func projected(_ samples: [TrackSample]) -> Self {
         let first = samples[0]
         let last = samples[samples.count - 1]

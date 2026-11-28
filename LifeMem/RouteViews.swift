@@ -373,6 +373,7 @@ extension EnvironmentValues {
 
 struct RouteDayReviewView: View {
     @Environment(\.currentRouteReview) private var currentReview
+    private let fullPhotoDay: RouteReviewDay?
     private let initialDay: RouteReviewDay
     private var day: RouteReviewDay {
         currentReview?.days.first { $0.date == initialDay.date } ?? initialDay
@@ -382,6 +383,9 @@ struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var photoLibrary = DayPhotoLibrary()
+    @AppStorage("matchDayPhotos") private var matchDayPhotos = false
+    @Query(filter: #Predicate<MemoryPhoto> { $0.assetID != nil }) private var photoDecisions: [MemoryPhoto]
     @State private var photoRequest: PhotoMapRequest?
     @State private var expandedMap = false
     @State private var scrollAfterMap: RouteReviewEntry.ID?
@@ -400,7 +404,8 @@ struct RouteDayReviewView: View {
         }
     }
 
-    init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil, allowsAutomaticLookup: Bool = true) {
+    init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil, allowsAutomaticLookup: Bool = true, fullPhotoDay: RouteReviewDay? = nil) {
+        self.fullPhotoDay = fullPhotoDay
         self.initialDay = day
         initialFocus = focus
         self.allowsAutomaticLookup = allowsAutomaticLookup
@@ -410,6 +415,12 @@ struct RouteDayReviewView: View {
     var body: some View {
         let canLookUp = scenePhase == .active && allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil
         let selected = day.entries.first { $0.id == selection.id }
+        let matchingDay = fullPhotoDay ?? day
+        let entryKeys = Set(day.entries.compactMap { $0.memoryKey?.value })
+        let assignedIDs = Set(photoDecisions.compactMap { item -> String? in
+            guard !item.hidden, let key = item.memory?.key, entryKeys.contains(key) else { return nil }
+            return item.assetID
+        })
         let photoActions = DayPhotoActions(entries: day.entries, name: { entry in
             day.title(for: entry) { placeResolver.label(near: $0, names: placeNames) }
         }, showMap: { request in
@@ -421,19 +432,24 @@ struct RouteDayReviewView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
-                    DailySummaryCard(day: day)
+                    VStack(alignment: .leading, spacing: 8) {
+                        DailySummaryCard(day: day)
+                        DayPhotoControls(enabled: $matchDayPhotos, library: photoLibrary)
+                    }
                     Section {
                         ForEach(day.entries) { entry in
-                            if entry.followsGap {
-                                Label("记录中断", systemImage: "ellipsis")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 12)
-                            }
-                            TimelineSegmentRow(entry: entry, selected: selection.id == entry.id) {
-                                selection.focus(entry.id)
-                            } nameTarget: { target in
-                                namingTarget = target
+                            VStack(alignment: .leading, spacing: 12) {
+                                if entry.followsGap {
+                                    Label("记录中断", systemImage: "ellipsis")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 12)
+                                }
+                                TimelineSegmentRow(entry: entry, selected: selection.id == entry.id) {
+                                    selection.focus(entry.id)
+                                } nameTarget: { target in
+                                    namingTarget = target
+                                }
                             }
                             .id(entry.id)
                         }
@@ -515,6 +531,14 @@ struct RouteDayReviewView: View {
             }
         }
         .environment(\.dayPhotoActions, photoActions)
+        .environment(\.dayLibrary, DayLibraryContext(library: photoLibrary, excluded: Set(photoDecisions.compactMap(\.assetID))))
+        .task(id: DayLibraryRevision(date: matchingDay.date, entries: matchingDay.entries.map {
+            .init(key: $0.memoryKey, start: $0.startedAt, end: $0.endedAt, segments: $0.segments.count, observations: $0.observedVisits.map { DateInterval(start: $0.startedAt, end: $0.endedAt) })
+        }, enabled: matchDayPhotos, visibleKeys: fullPhotoDay == nil ? nil : entryKeys, assignedIDs: assignedIDs, active: scenePhase == .active, revision: photoLibrary.revision)) {
+            if scenePhase == .active { await photoLibrary.refresh(matchingDay, detail: fullPhotoDay == nil ? nil : day, enabled: matchDayPhotos, assignedIDs: assignedIDs) }
+            else { photoLibrary.observe(false) }
+        }
+        .onDisappear { photoLibrary.observe(false) }
         .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
@@ -549,12 +573,15 @@ struct RouteDetailView: View {
     @Environment(\.calendar) private var calendar
     @Query(sort: \RecordedRoute.startedAt, order: .reverse) private var routes: [RecordedRoute]
     @State private var cache = RouteReviewCache()
+    @State private var photoCache = RouteReviewCache()
+    @AppStorage("matchDayPhotos") private var matchDayPhotos = false
     @State private var selectedDate: Date?
 
     var body: some View {
         let days = cache.detail(for: route, among: routes, calendar: calendar).days
         if let day = days.first(where: { $0.date == selectedDate }) ?? days.first {
-            RouteDayReviewView(day: day)
+            let fullDay = matchDayPhotos ? photoCache.day(routes: routes, containing: day.date, calendar: calendar).days.first { $0.date == day.date } : nil
+            RouteDayReviewView(day: day, fullPhotoDay: fullDay)
                 .environment(\.currentRouteReview, nil)
                 .id(day.id)
                 .toolbar {

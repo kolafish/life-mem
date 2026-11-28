@@ -204,6 +204,18 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
     }
 
+    func testPhotoConsentAndReturn() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons.matching(identifier: "review-day").firstMatch.tap()
+        let enable = app.buttons["显示当天照片"]
+        XCTAssertTrue(enable.waitForExistence(timeout: 5))
+        enable.tap()
+        XCTAssertTrue(app.alerts["关联当天拍摄的照片？"].waitForExistence(timeout: 5))
+        app.alerts.buttons["取消"].tap()
+        XCTAssertTrue(enable.isHittable)
+    }
+
     func testEmptyHistory() {
         let app = launch(fixture: "empty")
         app.tabBars.buttons["回顾"].tap()

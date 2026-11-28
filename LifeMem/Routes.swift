@@ -32,6 +32,7 @@ final class RouteReviewCache {
     private var contributionCalendar: Calendar?
     private var contributions: [RouteReviewRevision.RouteVersion: RouteReview.Contribution] = [:]
     private var snapshot: RouteReview?
+    private var overnight: (date: Date, revision: RouteReviewRevision, owners: Set<UUID>)?
 
     func review(routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
         let current = RouteReviewRevision(calendar: calendar, routes: routes)
@@ -57,8 +58,28 @@ final class RouteReviewCache {
         let future = routes.prefix { $0.startedAt >= end }
         let earlier = routes.dropFirst(future.count)
         let sameDay = earlier.prefix { $0.startedAt >= midnight }
-        let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
-        return review(routes: includingPredecessors(of: Array(subset), in: routes, calendar: calendar), calendar: calendar)
+        let prior = earlier.dropFirst(sameDay.count)
+        var subset = Array(future.suffix(1)) + sameDay + prior.prefix(1)
+        if prior.count > 1 {
+            let previous = RouteReviewRevision(calendar: calendar, routes: Array(prior))
+            if overnight?.date != midnight || overnight?.revision != previous {
+                let points = FetchDescriptor<RoutePoint>(predicate: #Predicate {
+                    $0.timestamp >= midnight && $0.timestamp < end
+                })
+                let owners: Set<UUID>
+                if let context = prior.first?.modelContext, let found = try? context.fetch(points) {
+                    owners = Set(found.compactMap { $0.route?.id })
+                } else {
+                    owners = Set(prior.filter { route in
+                        route.points.contains { $0.timestamp >= midnight && $0.timestamp < end }
+                    }.map(\.id))
+                }
+                overnight = (midnight, previous, owners)
+            }
+            let linked = Set(subset.compactMap(\.previousAutomaticRouteID))
+            subset += prior.dropFirst().filter { overnight?.owners.contains($0.id) == true || linked.contains($0.id) }
+        }
+        return review(routes: includingPredecessors(of: subset, in: routes, calendar: calendar), calendar: calendar)
     }
 
     func detail(for route: RecordedRoute, among routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
@@ -196,7 +217,7 @@ struct RouteReview {
                 let key = visit.sourceDepartureID.flatMap { departure in
                     visit.sourceArrivalID.map { RouteMemoryKey(arrival: $0, departure: departure) }
                 }
-                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
+                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, observedVisits: resolved.observedEdges[visit.id] ?? [], kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -409,6 +430,7 @@ struct AutomaticVisitBoundary: Codable, Sendable {
 struct ResolvedVisitGaps {
     private let continuing: [UUID: UUID]
     private(set) var incorporated = Set<PersistentIdentifier>()
+    private(set) var observedEdges: [PersistentIdentifier: [RouteVisit]] = [:]
     private(set) var gaps: [RouteVisit] = []
 
     init(_ routes: [(AutomaticVisitBoundary, [RouteVisit])], calendar: Calendar) {
@@ -430,6 +452,7 @@ struct ResolvedVisitGaps {
                 guard edge.coordinate.location.distance(from: candidate.coordinate.location) <= RouteReview.placeRadius,
                       edge.endedAt == candidate.startedAt || edge.startedAt == candidate.endedAt,
                       incorporated.insert(edge.id).inserted else { continue }
+                observedEdges[candidate.id, default: []].append(edge)
                 start = min(start, edge.startedAt)
                 end = max(end, edge.endedAt)
             }
