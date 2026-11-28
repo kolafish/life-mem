@@ -26,7 +26,7 @@ final class AutomaticTrips {
         var query = FetchDescriptor<RecordedRoute>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
         query.fetchLimit = 1
         guard let saved = try context.fetch(query).first, saved.isAutomatic == true,
-              sessionStart == nil || saved.automaticSessionStart == sessionStart,
+              saved.automaticSessionStart == nil || saved.automaticSessionStart == sessionStart,
               !saved.isFinished || saved.automaticPauseAt.map({ now.timeIntervalSince($0) < Self.shortStop }) == true
         else { return }
         route = saved
@@ -121,7 +121,10 @@ final class AutomaticTrips {
     private func close(_ route: RecordedRoute, at location: CLLocation?, rejoinAfter pause: Date?) throws {
         if let location { append(location, mode: .stationary, to: route) }
         route.isFinished = true
-        route.endedAtRest = true
+        let eventTime = pause ?? location?.timestamp
+        route.endedAtRest = eventTime.flatMap { time in
+            lastFix.map { (0...LocationSampling.maximumGap).contains(time.timeIntervalSince($0.timestamp)) }
+        } == true
         route.automaticPauseAt = pause
         try save()
     }

@@ -1265,6 +1265,7 @@ struct RouteChecks {
         let second = trips.route!
         precondition(first.isFinished && second.id != first.id && second.pointCount == 2)
         trips = AutomaticTrips(context: context)
+        trips.sessionStart = start
         try trips.restore(now: start.addingTimeInterval(755))
         try send(780, 0.0016)
         precondition(trips.route?.id == second.id && second.pointCount == 3)
@@ -1272,6 +1273,16 @@ struct RouteChecks {
         precondition(second.isFinished && trips.route == nil)
         let saved = try context.fetch(FetchDescriptor<RecordedRoute>())
         precondition(saved.count == 2 && !RouteReview(routes: saved, calendar: .current).days.isEmpty)
+        try send(1500, 0.002)
+        try send(1530, 0.0024)
+        let stale = trips.route!
+        try trips.receive(nil, stationary: true, receivedAt: start.addingTimeInterval(6000))
+        precondition(stale.isFinished && stale.endedAtRest != true)
+        try send(7200, 0.0024)
+        try send(7230, 0.0030)
+        let invalid = trips.route!
+        try send(8500, 0.0030, paused: true, accuracy: 500)
+        precondition(invalid.isFinished && invalid.endedAtRest != true)
     }
 
     private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {
