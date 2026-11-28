@@ -155,8 +155,10 @@ struct WeeklyVisits: Sendable {
             places = []
             return
         }
+        let wallTime: Set<Calendar.Component> = [.hour, .minute, .second]
         let windows = (0...4).compactMap { offset -> DateInterval? in
             guard let end = calendar.date(byAdding: .weekOfYear, value: -offset, to: now),
+                  calendar.dateComponents(wallTime, from: end) == calendar.dateComponents(wallTime, from: now),
                   let start = calendar.dateInterval(of: .weekOfYear, for: end)?.start, start < end else { return nil }
             return DateInterval(start: start, end: end)
         }
@@ -178,7 +180,6 @@ struct WeeklyVisits: Sendable {
             guard history.count == observed.count else { return false }
             return zip(observed, history).allSatisfy { a, b in
                 let longest = max(a.reduce(0) { $0 + $1.duration }, b.reduce(0) { $0 + $1.duration })
-                let wallTime: Set<Calendar.Component> = [.hour, .minute, .second]
                 let historical = b.compactMap { span -> DateInterval? in
                     guard let begin = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.start),
                           let end = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.end), begin < end,

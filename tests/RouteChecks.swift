@@ -1212,6 +1212,18 @@ struct RouteChecks {
                                      calendar: pacific, now: sunday.addingTimeInterval(5 * 3600))
         precondition(afterJump.places.first?.current.visits.count == 1 && afterJump.places.first?.usualDays == nil)
 
+        let nextSunday = pacific.date(from: DateComponents(year: 2026, month: 3, day: 15))!
+        let earlyRecords = (0...4).map { week -> RouteSummaryRecord in
+            let day = pacific.date(byAdding: .weekOfYear, value: -week, to: nextSunday)!
+            let end = day.addingTimeInterval(1800)
+            let id = RecordedRoute(startedAt: day).persistentModelID
+            let stay = StayEvent(id: id, visitID: id, coordinate: .init(latitude: 0, longitude: 0), startedAt: day, endedAt: end)
+            let visit = RouteVisit(id: id, date: day, startedAt: day, endedAt: end, coordinate: stay.coordinate)
+            return RouteSummaryRecord(days: [DailySummary(date: day, inferredStay: stay)], visits: [visit], journeys: [])
+        }
+        let missingCutoff = WeeklyVisits(summary: RouteSummary(records: earlyRecords, calendar: pacific),
+                                        calendar: pacific, now: nextSunday.addingTimeInterval(2.5 * 3600))
+        precondition(missingCutoff.places.first?.current.visits.count == 1 && missingCutoff.places.first?.usualDays == nil)
         let ordinarySunday = pacific.date(from: DateComponents(year: 2026, month: 11, day: 8))!
         let autumn = (0...4).map { week -> RouteSummaryRecord in
             let day = pacific.date(byAdding: .weekOfYear, value: -week, to: ordinarySunday)!
