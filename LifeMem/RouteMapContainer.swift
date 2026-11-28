@@ -60,6 +60,7 @@ struct RouteMapContainer: View {
                         VStack(spacing: 0) {
                             Label("拍摄位置", systemImage: "camera.fill")
                                 .font(.caption.weight(.semibold))
+                                .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 9).padding(.vertical, 6)
                                 .foregroundStyle(.white).background(.purple, in: .capsule)
                             Rectangle().fill(.purple).frame(width: 2, height: 8)
