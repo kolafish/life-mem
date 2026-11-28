@@ -61,7 +61,9 @@ struct RouteReviewDay: Identifiable {
             let from = ends.startName ?? named(ends.start), to = ends.endName ?? named(ends.end)
             if from != nil || to != nil { return "\(from ?? "起点") → \(to ?? "终点")" }
         }
-        return entry.moves.first?.mode.recordedTitle ?? "记录片段"
+        let modes = Set(entry.moves.map(\.mode))
+        if modes.count == 1, let mode = modes.first { return mode.recordedTitle }
+        return modes.isEmpty ? "记录片段" : "混合行程"
     }
 
     func placeSequence(named: (CLLocationCoordinate2D) -> String?) -> String? {
@@ -69,12 +71,12 @@ struct RouteReviewDay: Identifiable {
         func append(_ name: String?) {
             if let name, name != result.last { result.append(name) }
         }
-        for (index, entry) in entries.enumerated() {
+        for entry in entries {
             if let stay = entry.stay, stay.isCandidate != true {
                 append(stay.visitName ?? named(stay.coordinate))
             } else if let ends = entry.endpoints {
-                if index == 0 || entries[index - 1].stay == nil { append(ends.startName ?? named(ends.start)) }
-                if index == entries.count - 1 || entries[index + 1].stay == nil { append(ends.endName ?? named(ends.end)) }
+                append(ends.startName ?? named(ends.start))
+                append(ends.endName ?? named(ends.end))
             }
         }
         return result.isEmpty ? nil : result.joined(separator: " → ")
