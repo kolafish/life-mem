@@ -241,8 +241,8 @@ enum SegmentBuilder {
                 // from another possible visit must not be borrowed across its dwell.
                 let before = i == 0 ? run.startIndex : candidates[i - 1].0.upperBound
                 let after = i + 1 == candidates.count ? run.endIndex : candidates[i + 1].0.lowerBound
-                let arriving = ArrivalMotion.adjacent(in: run[before..<range.lowerBound].reversed(), from: run[range.lowerBound])
-                let leaving = ArrivalMotion.adjacent(in: run[range.upperBound..<after], from: run[range.upperBound - 1])
+                let arriving = ArrivalMotion.adjacent(in: run[before..<range.lowerBound].reversed(), from: run[range.lowerBound], acrossResumption: true)
+                let leaving = ArrivalMotion.adjacent(in: run[range.upperBound..<after], from: run[range.upperBound - 1], acrossResumption: true)
                 guard ArrivalMotion.supportsVisit(arriving: arriving, leaving: leaving, at: run[range.lowerBound].fix) else { continue }
             }
             if movementStart < range.lowerBound { slices.append(.move(run[movementStart..<range.lowerBound])) }

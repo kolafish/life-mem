@@ -8,7 +8,6 @@ import SwiftData
 @Observable
 final class AutomaticTrips {
     static let shortStop: TimeInterval = 8 * 60
-    nonisolated static let maximumResumption: TimeInterval = 24 * 3600
 
     private let context: ModelContext
     private(set) var route: RecordedRoute?
@@ -31,7 +30,7 @@ final class AutomaticTrips {
         query.fetchLimit = 1
         guard let saved = try context.fetch(query).first, saved.isAutomatic == true,
               saved.automaticSessionStart == nil || saved.automaticSessionStart == sessionStart,
-              !saved.isFinished || saved.automaticPauseAt.map({ now.timeIntervalSince($0) <= Self.maximumResumption }) == true
+              !saved.isFinished || saved.automaticPauseAt.map({ now.timeIntervalSince($0) <= ArrivalMotion.maximumResumption }) == true
         else { return }
         route = saved
         let ordered = saved.points.sorted { $0.timestamp < $1.timestamp }.map(\.locationPoint)
@@ -126,8 +125,8 @@ final class AutomaticTrips {
 
         let trip: RecordedRoute
         if let recent = route, let stopped = recent.automaticPauseAt,
-           anchor.timestamp.timeIntervalSince(stopped) <= Self.maximumResumption,
-           (anchor.timestamp.timeIntervalSince(stopped) < Self.shortStop || !supportsDeparture(from: anchor, to: location)),
+           anchor.timestamp.timeIntervalSince(stopped) <= ArrivalMotion.maximumResumption,
+           ((!observedArrival && anchor.timestamp.timeIntervalSince(stopped) < Self.shortStop) || !supportsDeparture(from: anchor, to: location)),
            let lastFix, anchor.distance(from: lastFix) <= 100 {
             trip = recent
         } else {

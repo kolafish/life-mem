@@ -1566,7 +1566,7 @@ struct RouteChecks {
     private static func checkDrivingStops() throws {
         // Feed the live recorder, reopen its archive, then check both the timeline and the index.
         let start = Date(timeIntervalSince1970: 1_600_000_000)
-        func replay(shop: Bool, paused: Bool = false, creep: Double = 0, stopAndGo: Bool = false, restore: Bool = false, inVehicle: Bool = false, crawlBefore: Bool = false, crawlAfter: Bool = false, distantSignalLoss: Bool = false) throws {
+        func replay(shop: Bool, paused: Bool = false, creep: Double = 0, stopAndGo: Bool = false, restore: Bool = false, inVehicle: Bool = false, crawlBefore: Bool = false, crawlAfter: Bool = false, distantSignalLoss: Bool = false, latePause: Bool = false) throws {
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
             let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: config)
             var recorder = AutomaticTrips(context: store.mainContext)
@@ -1618,6 +1618,13 @@ struct RouteChecks {
                 if restore { try reopen() }
                 try move(300, east: creep)
             }
+            if latePause {
+                time.addTimeInterval(5)
+                try fix(0, paused: true)
+                time.addTimeInterval(25)
+                if restore { try reopen() }
+                try fix(0)
+            }
             if shop && !distantSignalLoss { try move(40, north: -1); try move(30) }
             if crawlAfter { try move(50, east: 1) }
             try move(240, east: 10)
@@ -1630,7 +1637,8 @@ struct RouteChecks {
             let entries = review.days.flatMap(\.entries)
             let hasVisit = shop && !inVehicle && !distantSignalLoss
             let expected = hasVisit ? 2 : 1
-            precondition(routes.count == expected && review.journeys.count == expected && index.journeys.count == expected)
+            precondition(routes.count == expected && review.journeys.count == expected && index.journeys.count == expected,
+                         "shop=\(shop) paused=\(paused) latePause=\(latePause) restore=\(restore) raw=\(routes.count) cards=\(entries.map(\.kind))")
             precondition(entries.map(\.kind) == (hasVisit ? [.trip, .visit, .trip] : [.trip]))
             if hasVisit {
                 precondition((entries[1].stay?.isCandidate == true) == paused)
@@ -1650,6 +1658,10 @@ struct RouteChecks {
         try replay(shop: false, crawlAfter: true)
         try replay(shop: false, crawlBefore: true, crawlAfter: true)
         try replay(shop: false, paused: true, crawlBefore: true, crawlAfter: true)
+        try replay(shop: false, crawlBefore: true, latePause: true)
+        try replay(shop: false, restore: true, crawlBefore: true, latePause: true)
+        try replay(shop: true, latePause: true)
+        try replay(shop: true, restore: true, latePause: true)
 
         // Earlier recorders wrote separate rows for the same vehicle stop.
         let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))

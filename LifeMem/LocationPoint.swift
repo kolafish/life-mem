@@ -198,6 +198,8 @@ enum RouteStep {
 /// The last supported way of travelling into a stop. Short bursts at walking
 /// speed are common in a queue, so require displacement beyond the GPS error.
 struct ArrivalMotion {
+    static let maximumResumption: TimeInterval = 24 * 3600
+
     private(set) var mode: TravelMode = .unknown
     private(set) var includesDriving = false
     private(set) var walkOrigin: CLLocation?
@@ -251,7 +253,7 @@ struct ArrivalMotion {
 
     /// Scan outward from a stop, in either time direction. A signal gap
     /// cannot supply evidence about the approach on the other side.
-    static func adjacent<S: Sequence, ID>(in points: S, from edge: LocationPoint<ID>) -> Self
+    static func adjacent<S: Sequence, ID>(in points: S, from edge: LocationPoint<ID>, acrossResumption: Bool = false) -> Self
     where S.Element == LocationPoint<ID> {
         var evidence = Self()
         var closest: Self?
@@ -259,7 +261,17 @@ struct ArrivalMotion {
         for point in points {
             let later = point.timestamp > previous.timestamp ? point : previous
             let earlier = point.timestamp > previous.timestamp ? previous : point
-            if point.timestamp != previous.timestamp, !later.continuesObservation(after: earlier) { break }
+            if point.timestamp != previous.timestamp, !later.continuesObservation(after: earlier) {
+                // A resumed automatic run still has a map break. Look at travel on
+                // its far side only if it restarts at the same observed position.
+                let gap = later.timestamp.timeIntervalSince(earlier.timestamp)
+                guard acrossResumption, later.startsRecordingRun == true, gap <= ArrivalMotion.maximumResumption,
+                      later.fix.distance(from: earlier.fix) <= max(25, later.accuracy, earlier.accuracy) else { break }
+                evidence = Self()
+                // Over a long blind interval only use the subsequent vehicle
+                // context to rule out a stop, never to establish a walk.
+                if closest == nil, gap > LocationSampling.maximumGap { closest = evidence }
+            }
             if closest == nil {
                 evidence.observe(point.mode, at: point.fix)
                 if evidence.mode != .unknown { closest = evidence }

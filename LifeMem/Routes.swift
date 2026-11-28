@@ -348,7 +348,7 @@ struct ResolvedVisitGaps {
             guard let id = next.previous, let previous = sources[id], next.session == previous.session,
                   previous.endedAtRest, previous.endsDriving, next.startsDriving,
                   !previous.endsWithVisit, !next.startsWithVisit, next.decision != "confirmed",
-                  (0...AutomaticTrips.maximumResumption).contains(next.start.timeIntervalSince(previous.end)),
+                  (0...ArrivalMotion.maximumResumption).contains(next.start.timeIntervalSince(previous.end)),
                   previous.destination.coordinate.location.distance(from: next.origin.coordinate.location) <= RouteReview.placeRadius
             else { return nil }
             return (next.routeID, id)
