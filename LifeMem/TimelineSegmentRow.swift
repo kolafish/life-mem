@@ -25,7 +25,7 @@ struct TimelineSegmentRow: View {
                         .accessibilityHidden(true)
                     ReviewTextRow(
                         title: title(for: entry),
-                        detail: entry.stay.map { routeDuration($0.duration) } ?? moveDetail(moves),
+                        detail: entry.stay.map { $0.isCandidate == true ? "由相邻行程端点推测" : routeDuration($0.duration) } ?? moveDetail(moves),
                         time: clockRange(entry.startedAt, entry.endedAt)
                     )
                     Spacer(minLength: 4)
@@ -90,7 +90,9 @@ struct TimelineSegmentRow: View {
 
     private func title(for entry: RouteReviewEntry) -> String {
         if let coordinate = entry.visitCoordinate {
-            return placeResolver.label(near: coordinate, names: placeNames) ?? "停留地点"
+            let name = placeResolver.label(near: coordinate, names: placeNames)
+            if entry.stay?.isCandidate == true { return name.map { "可能在\($0)附近停留" } ?? "可能的停留 · 待确认" }
+            return name ?? "停留地点"
         }
         if let endpoints = entry.endpoints {
             let start = placeResolver.label(near: endpoints.start, names: placeNames)
