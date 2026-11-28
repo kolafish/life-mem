@@ -5,9 +5,12 @@ struct RecordView: View {
     let recorder: RouteRecorder
     let day: RouteReviewDay?
     let loading: Bool
+    let stays: [TodayPlaceStay]
+    @Environment(\.calendar) private var calendar
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
     @Environment(\.openURL) private var openURL
+    @State private var expandedStays = Set<Date>()
     @State private var focusedEntry: FocusedEntry?
     @State private var routeToDiscard: RecordedRoute?
     @State private var discardFailed = false
@@ -85,20 +88,39 @@ struct RecordView: View {
                     }
                 }
 
-                if let day {
+                if day != nil || !stays.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(day.entries) { entry in
-                            Button {
-                                focusedEntry = FocusedEntry(day: day, id: entry.id)
-                            } label: {
-                                let name = day.title(for: entry) { resolver.label(near: $0, names: names) }
-                                ReviewTextRow(title: name, detail: nil, time: clockRange(entry.startedAt, entry.endedAt))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(timeline) { row in
+                            switch row {
+                            case let .entry(entry):
+                                if let day { entryButton(entry, in: day) }
+                            case let .stay(stay, entries):
+                                if let day, !entries.isEmpty {
+                                    let expanded = expandedStays.contains(stay.id)
+                                    Button {
+                                        if expanded { expandedStays.remove(stay.id) }
+                                        else { expandedStays.insert(stay.id) }
+                                    } label: {
+                                        HStack {
+                                            stayLabel(stay)
+                                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                                .font(.footnote.weight(.semibold))
+                                                .accessibilityHidden(true)
+                                        }
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityValue(expanded ? "已展开" : "已收起")
+                                    .accessibilityIdentifier("today-place-stay")
+                                    if expanded {
+                                        ForEach(entries) { entry in entryButton(entry, in: day) }
+                                            .padding(.leading, 16)
+                                    }
+                                } else {
+                                    stayLabel(stay)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.tint)
-                            .accessibilityIdentifier(entry.stay == nil ? "today-entry" : "today-stop")
-                            if let stay = entry.stay { VisitMemoryLink(stay: stay) }
                         }
                     }
                 } else if loading {
@@ -163,6 +185,65 @@ struct RecordView: View {
         } message: {
             Text("请检查设备的可用存储空间后重试。")
         }
+    }
+
+    private enum Row: Identifiable {
+        case entry(RouteReviewEntry)
+        case stay(TodayPlaceStay, [RouteReviewEntry])
+
+        var id: AnyHashable {
+            switch self {
+            case let .entry(entry): AnyHashable(entry.id)
+            case let .stay(stay, _): AnyHashable(stay.id)
+            }
+        }
+
+        var start: Date {
+            switch self {
+            case let .entry(entry): entry.startedAt
+            case let .stay(stay, _): stay.startedAt
+            }
+        }
+    }
+
+    private var timeline: [Row] {
+        var entries = day?.entries ?? []
+        var rows = [Row]()
+        for stay in stays {
+            let end = stay.end ?? .distantFuture
+            let covered = entries.filter { stay.startedAt <= $0.startedAt && $0.endedAt <= end }
+            let ids = Set(covered.map(\.id))
+            entries.removeAll { ids.contains($0.id) }
+            rows.append(.stay(stay, covered))
+        }
+        return (rows + entries.map(Row.entry)).sorted { $0.start < $1.start }
+    }
+
+    private func stayLabel(_ stay: TodayPlaceStay) -> some View {
+        TimelineView(.everyMinute) { tick in
+            let end = stay.end ?? tick.date
+            let start = min(stay.startedAt, end)
+            let time = calendar.isDate(start, inSameDayAs: end)
+                ? clockRange(start, end)
+                : (start..<end).formatted(.interval.month().day().hour().minute())
+            let status = stay.end == nil ? "可能仍在停留" : "可能停留"
+            ReviewTextRow(title: stay.name.map { "\($0) · \(status)" } ?? status,
+                          detail: nil, time: time)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func entryButton(_ entry: RouteReviewEntry, in day: RouteReviewDay) -> some View {
+        Button { focusedEntry = FocusedEntry(day: day, id: entry.id) } label: {
+            let name = day.title(for: entry) { resolver.label(near: $0, names: names) }
+            ReviewTextRow(title: name, detail: nil, time: clockRange(entry.startedAt, entry.endedAt))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .accessibilityIdentifier(entry.stay == nil ? "today-entry" : "today-stop")
+        if let stay = entry.stay { VisitMemoryLink(stay: stay) }
     }
 
     private var statusDetail: String {
