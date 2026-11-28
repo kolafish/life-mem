@@ -290,8 +290,8 @@ struct AnalyticsView: View {
     }
 
     private func patternTitle(_ pattern: RouteBehavior.RoutePattern, index: Int) -> String {
-        let start = resolver.label(near: pattern.start, names: names)
-        let end = resolver.label(near: pattern.end, names: names)
+        let start = pattern.startName ?? resolver.label(near: pattern.start, names: names)
+        let end = pattern.endName ?? resolver.label(near: pattern.end, names: names)
         if start == nil, end == nil { return "路线 \(index + 1) · \(pattern.mode.recordedTitle)" }
         return "\(start ?? "起点") → \(end ?? "终点") · \(pattern.mode.recordedTitle)"
     }

@@ -1253,6 +1253,16 @@ struct RouteChecks {
         try VisitCorrection.save(stay, name: "隔壁咖啡店", in: context)
         let edited = RouteReview(routes: [observed], calendar: calendar)
         precondition(edited.places[0].visitName == "隔壁咖啡店")
+        for (index, x) in [0.001, 0.002].enumerated() {
+            let fix = location(longitude: x, at: visitStart.addingTimeInterval(Double(630 + index * 30)))
+            context.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: index == 0, route: observed))
+            observed.pointCount += 1
+        }
+        try context.save()
+        let changed = RouteReview(routes: [observed], calendar: calendar)
+        precondition(changed.journeys.first?.endpoints.startName == "隔壁咖啡店")
+        let behavior = RouteBehavior(review: changed, range: midnight...midnight, calendar: calendar) { _ in .home }
+        precondition(behavior.routine.isEmpty)
         let all = RoutePlace.group(edited.places[0].visits + confirmed.places[0].visits, within: 100)
         precondition(all.count == 2)
     }

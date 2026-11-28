@@ -8,6 +8,8 @@ struct RouteReviewEntry: Identifiable {
     enum Kind { case trip, visit, fragment }
 
     struct Endpoints: Codable, Sendable {
+        var startName: String?
+        var endName: String?
         private let origin: StoredCoordinate
         private let destination: StoredCoordinate
 
@@ -121,7 +123,7 @@ struct RouteJourney: Identifiable, Codable, Sendable {
     }
 
     let id: PersistentIdentifier
-    let endpoints: RouteReviewEntry.Endpoints
+    var endpoints: RouteReviewEntry.Endpoints
     let departedAt: Date
     let duration: TimeInterval
     let mode: TravelMode

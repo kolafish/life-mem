@@ -82,8 +82,9 @@ enum VisitCorrection {
         let savedName = label?.isEmpty == false ? label : nil
         let route: RecordedRoute
         if stay.isInferred == true {
+            let id = stay.visitID
             guard let owner = try context.fetch(FetchDescriptor<RecordedRoute>(
-                predicate: #Predicate { $0.isAutomatic == true })).first(where: { $0.persistentModelID == stay.visitID }),
+                predicate: #Predicate { $0.persistentModelID == id })).first, owner.isAutomatic == true,
                   owner.previousAutomaticRouteID == stay.sourceArrivalID,
                   let previous = stay.sourceArrivalID,
                   try context.fetchCount(FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == previous })) == 1

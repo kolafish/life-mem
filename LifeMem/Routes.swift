@@ -189,11 +189,15 @@ struct RouteReview {
                                                             leadingStayPoint: leading, trailingStayPoint: trailing)
                 let departureDay = leading.map { calendar.startOfDay(for: $0.timestamp) }
                 let arrivalDay = trailing.map { calendar.startOfDay(for: $0.timestamp) }
+                let startName = previousSlice?.points.first.flatMap { edits[$0.id] }
+                let endName = nextSlice?.points.first.flatMap { edits[$0.id] }
                 for (day, segments) in SegmentBuilder.project(completeSegments, by: calendar) {
                     let hasMovement = segments.contains { $0.distanceMeters > 0 }
                     guard hasMovement || (firstDay...lastDay).contains(day) else { continue }
-                    let endpoints = hasMovement ? Self.endpoints(in: segments, previousVisit: day == departureDay ? previousCoordinate : nil,
+                    var endpoints = hasMovement ? Self.endpoints(in: segments, previousVisit: day == departureDay ? previousCoordinate : nil,
                                                                 nextVisit: day == arrivalDay ? nextCoordinate : nil) : nil
+                    endpoints?.startName = day == departureDay ? startName : nil
+                    endpoints?.endName = day == arrivalDay ? endName : nil
                     contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
                         kind: hasMovement ? .trip : .fragment, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                         segments: segments, endpoints: endpoints, stay: nil
@@ -202,7 +206,9 @@ struct RouteReview {
                 let arrival = trailing.flatMap { point in
                     nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
                 }
-                if let journey = Self.journey(in: completeSegments, departure: previousCoordinate, arrival: arrival) {
+                if var journey = Self.journey(in: completeSegments, departure: previousCoordinate, arrival: arrival) {
+                    journey.endpoints.startName = startName
+                    journey.endpoints.endName = endName
                     contribution.journeys.append(journey)
                 }
             }

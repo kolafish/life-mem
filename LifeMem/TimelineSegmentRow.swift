@@ -15,7 +15,7 @@ struct TimelineSegmentRow: View {
     @Environment(PlaceResolver.self) private var placeResolver
 
     var body: some View {
-        let category = entry.visitCoordinate.flatMap { placeNames.category(for: $0) }
+        let category = entry.stay.flatMap { $0.visitName == nil ? placeNames.category(for: $0.coordinate) : nil }
         let moves = entry.moves
         let color = category?.mapColor ?? (entry.kind == .visit ? .teal : moves.first?.mode.mapColor ?? .secondary)
         return VStack(alignment: .leading, spacing: 0) {
@@ -125,8 +125,8 @@ struct TimelineSegmentRow: View {
             return name ?? "停留地点"
         }
         if let endpoints = entry.endpoints {
-            let start = placeResolver.label(near: endpoints.start, names: placeNames)
-            let end = placeResolver.label(near: endpoints.end, names: placeNames)
+            let start = endpoints.startName ?? placeResolver.label(near: endpoints.start, names: placeNames)
+            let end = endpoints.endName ?? placeResolver.label(near: endpoints.end, names: placeNames)
             if start != nil || end != nil { return "\(start ?? "起点") → \(end ?? "终点")" }
         }
         if let mode = entry.moves.first?.mode, entry.moves.allSatisfy({ $0.mode == mode }) {
