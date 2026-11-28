@@ -26,7 +26,6 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private(set) var automaticNeedsSettings = false
     private var automaticTask: Task<Void, Never>?
     private var backgroundSession: CLBackgroundActivitySession?
-    private var requestedAlways = false
 
     private let context: ModelContext
     private let summaryIndex: RouteSummaryIndex
@@ -50,11 +49,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         locationManager.pausesLocationUpdatesAutomatically = false
         recoverUnfinishedRoute()
         if automaticEnabled && state == .idle {
-            if locationManager.authorizationStatus == .authorizedAlways {
-                startAutomaticStream()
-            } else {
-                automaticNeedsSettings = true
-            }
+            updateAutomaticAuthorization()
         }
     }
 
@@ -65,22 +60,31 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
             automaticEnabled = true
             preferences.set(Date.now, forKey: "automaticRecordingSince")
             preferences.set(true, forKey: "automaticRecordingEnabled")
-            switch locationManager.authorizationStatus {
-            case .notDetermined: locationManager.requestWhenInUseAuthorization()
-            case .authorizedWhenInUse: requestAutomaticAuthorization()
-            case .authorizedAlways: startAutomaticStream()
-            default: automaticNeedsSettings = true
+            if locationManager.authorizationStatus == .notDetermined {
+                locationManager.requestWhenInUseAuthorization()
             }
+            updateAutomaticAuthorization()
         } else {
             stopAutomatic()
         }
     }
 
-    private func requestAutomaticAuthorization() {
-        automaticNeedsSettings = true
-        guard !requestedAlways else { return }
-        requestedAlways = true
-        locationManager.requestAlwaysAuthorization()
+    private func updateAutomaticAuthorization() {
+        needsPreciseLocation = locationManager.accuracyAuthorization == .reducedAccuracy
+        switch locationManager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            startAutomaticStream()
+        case .notDetermined, .restricted, .denied:
+            if automaticTask != nil {
+                stopAutomatic()
+                notice = "自动记录已关闭。允许使用定位后，可以重新开启。"
+            } else {
+                automaticNeedsSettings = true
+            }
+        @unknown default:
+            stopAutomatic()
+            notice = "暂时无法读取定位权限。"
+        }
     }
 
     private func startAutomaticStream() {
@@ -125,7 +129,6 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         backgroundSession = nil
         automaticEnabled = false
         automaticNeedsSettings = false
-        requestedAlways = false
         preferences.set(false, forKey: "automaticRecordingEnabled")
     }
 
@@ -218,18 +221,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         if automaticEnabled {
-            needsPreciseLocation = manager.accuracyAuthorization == .reducedAccuracy
-            switch manager.authorizationStatus {
-            case .authorizedAlways: startAutomaticStream()
-            case .authorizedWhenInUse where automaticTask == nil:
-                requestAutomaticAuthorization()
-            case .notDetermined: break
-            default:
-                if automaticTask != nil {
-                    stopAutomatic()
-                    notice = "自动记录已关闭。允许始终定位后，可以重新开启。"
-                } else { automaticNeedsSettings = true }
-            }
+            updateAutomaticAuthorization()
             return
         }
         switch manager.authorizationStatus {

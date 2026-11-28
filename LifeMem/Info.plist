@@ -3,9 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>开始记录后，Life Mem 会在锁屏时继续采集位置，用于在这台 iPhone 上回看路线。</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>开启自动记录后，Life Mem 会在锁屏时检测出发和抵达，并将路线保存在这台 iPhone 上。</string>
+    <string>开启手动或自动记录后，Life Mem 会在锁屏时继续使用位置，将路线保存在这台 iPhone 上。</string>
     <key>NSMotionUsageDescription</key>
     <string>识别步行、乘车和静止，以调整路线记录的定位频率。</string>
     <key>UIBackgroundModes</key>

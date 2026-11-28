@@ -20,13 +20,16 @@ final class ReviewUITests: XCTestCase {
         #if targetEnvironment(simulator)
         defer { XCUIDevice.shared.location = nil }
         let recording = app.staticTexts["正在自动记录"]
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
         for step in 0..<8 {
             let fix = CLLocation(coordinate: .init(latitude: 0, longitude: Double(step) * 0.00015),
                                  altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: .now)
             XCUIDevice.shared.location = XCUILocation(location: fix)
-            if recording.waitForExistence(timeout: 2) { break }
+            Thread.sleep(forTimeInterval: 2)
         }
-        XCTAssertTrue(recording.exists, app.debugDescription)
+        app.activate()
+        XCTAssertTrue(recording.waitForExistence(timeout: 5), app.debugDescription)
         #endif
         scrollTo(toggle, in: app)
         toggle.tap()
