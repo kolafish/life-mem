@@ -92,7 +92,7 @@ struct RecordView: View {
                     ))
                     .disabled(recorder.state != .idle || recorder.isDeletingRoute)
                     Text(recorder.state == .idle
-                         ? "允许始终定位后，出发和到达会自动记录到回顾。"
+                         ? "允许「使用 App 期间」定位后，可以锁屏自动记录。"
                          : "结束当前手动记录后可以开启。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -100,7 +100,7 @@ struct RecordView: View {
 
                 if recorder.automaticNeedsSettings || (recorder.needsPreciseLocation && (recorder.state == .recording || recorder.automaticEnabled)) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(recorder.automaticNeedsSettings ? "请在定位设置中选择「始终」。" : "开启精确位置后才能绘制详细路线。")
+                        Text(recorder.automaticNeedsSettings ? "请在定位设置中选择「使用 App 期间」。" : "开启精确位置后才能绘制详细路线。")
                             .font(.subheadline)
                         Button("打开系统设置") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }

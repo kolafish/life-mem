@@ -13,7 +13,7 @@ Life Mem 是一个 iPhone 路线记录工具。点「开始记录」，锁屏后
 
 ## 自动记录（试用）
 
-在「记录」页开启「自动记录（试用）」，允许始终定位并开启精确位置，即可锁屏出行。手动路线结束后可以开启试用，关闭试用即可使用手动记录。系统交付的实时位置由同一套采样规则写入本机路线库和回顾。
+在「记录」页开启「自动记录（试用）」，选择「使用 App 期间」并开启精确位置，即可锁屏出行。自动记录使用从前台开启的可见后台定位会话，系统可能显示定位指示。静止后 iOS 可以暂停更新，移动后可以自动恢复，触发时间由系统决定。手动路线结束后可以开启试用，关闭试用即可使用手动记录。系统交付的实时位置由同一套采样规则写入本机路线库和回顾。
 
 为减少静置漂移，90 秒内的两个有效位置须相距至少 25 米且达到两点水平精度之和，确认后从第一个位置开始保存。系统报告静止时保存并结束路线。若在 8 分钟内从停下位置附近（100 米内）再次出发，会接回同一条路线并新开一段。较长停留下次出发时另起路线。若系统持续投递位置，低速定位在约 25 米（精度较低时放宽至水平误差）范围内持续 8 分钟也会收尾。iOS 决定锁屏定位的投递时机；试用时可在回顾中核对起点、途中停顿和终点。
 
@@ -81,11 +81,11 @@ xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
 
 在已启动的 iPhone 模拟器上运行，使用隔离的临时存储和合成路线。将 `SIMULATOR_ID` 换成 `xcrun simctl list devices booted` 中的模拟器 ID。
 
-自动记录界面用例使用模拟器的始终定位权限。可用上方模拟器构建产物安装并授权。
+自动记录界面用例使用模拟器的「使用 App 期间」定位权限。可用上方模拟器构建产物安装并授权。
 
 ```sh
 xcrun simctl install SIMULATOR_ID DerivedData/simulator/Build/Products/Debug-iphonesimulator/LifeMem.app
-xcrun simctl privacy SIMULATOR_ID grant location-always dev.kolafish.lifemem
+xcrun simctl privacy SIMULATOR_ID grant location dev.kolafish.lifemem
 xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
   -destination 'id=SIMULATOR_ID' -derivedDataPath DerivedData/ui-tests \
   -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
