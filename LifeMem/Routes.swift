@@ -120,6 +120,12 @@ struct RouteReview {
         let resolved = ResolvedVisitGaps(contributions.compactMap { item in
             item.boundary.map { ($0, item.visits) }
         }, calendar: calendar)
+        // Link the source trip keys before projecting joined drives into individual days.
+        let routes = contributions.compactMap { item -> (UUID, [RouteReviewEntry])? in
+            guard let id = item.boundary?.routeID else { return nil }
+            return (id, item.entriesByDay.values.flatMap { $0 }.filter { $0.kind == .trip })
+        }
+        let sharedKeys = resolved.sharedTripKeys(routes)
         let inferred = resolved.gaps
         let edges = ConfirmedVisitEdges(visits: inferred)
         for contribution in contributions {
@@ -127,6 +133,7 @@ struct RouteReview {
                 entriesByDay[date, default: []] += entries.compactMap { entry in
                     if let stay = entry.stay, resolved.incorporated.contains(stay.visitID) { return nil }
                     var entry = entry
+                    if let key = entry.memoryKey, let shared = sharedKeys[key] { entry.memoryKey = shared }
                     if let ends = entry.endpoints {
                         entry.endpoints = edges.names(for: contribution.boundary, endpoints: ends,
                                                       start: entry.startedAt, end: entry.endedAt)
@@ -200,7 +207,7 @@ struct RouteReview {
                                              startedAt: max(day, first.timestamp), endedAt: min(dayEnd, last.timestamp))
                         stay.visitName = observation.visitName
                         contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
-                            memoryKey: .init(owner: route.id, start: first.timestamp, visit: true),
+                            memoryKey: .init(owner: route.id, start: first.timestamp),
                             kind: .visit, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                             segments: segments, endpoints: nil, stay: stay
                         ))
@@ -232,7 +239,7 @@ struct RouteReview {
                     endpoints?.startName = day == departureDay ? startName : nil
                     endpoints?.endName = day == arrivalDay ? endName : nil
                     contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
-                        memoryKey: hasMovement ? .init(owner: route.id, start: first.timestamp, visit: false) : nil,
+                        memoryKey: hasMovement ? .init(owner: route.id, start: first.timestamp) : nil,
                         kind: hasMovement ? .trip : .fragment, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                         segments: segments, endpoints: endpoints, stay: nil
                     ))
@@ -381,6 +388,28 @@ struct ResolvedVisitGaps {
             visit.sourceDepartureID = candidate.sourceDepartureID
             gaps.append(visit)
         }
+    }
+
+    func sharedTripKeys(_ routes: [(UUID, [RouteReviewEntry])]) -> [RouteMemoryKey: RouteMemoryKey] {
+        guard !continuing.isEmpty else { return [:] }
+        let trips = Dictionary(uniqueKeysWithValues: routes)
+        var links: [RouteMemoryKey: RouteMemoryKey] = [:]
+        for (next, previous) in continuing {
+            guard let tail = trips[previous]?.max(by: { $0.endedAt < $1.endedAt })?.memoryKey,
+                  let head = trips[next]?.min(by: { $0.startedAt < $1.startedAt })?.memoryKey else { continue }
+            links[head] = tail
+        }
+        var resolved: [RouteMemoryKey: RouteMemoryKey] = [:]
+        for key in links.keys where resolved[key] == nil {
+            var path = Set<RouteMemoryKey>()
+            var first = key
+            while let previous = links[first], path.insert(first).inserted {
+                if let known = resolved[previous] { first = known; break }
+                first = previous
+            }
+            for part in path { resolved[part] = first }
+        }
+        return resolved
     }
 
     /// Join only explicitly linked neighbours, keeping every recorded geometry break.

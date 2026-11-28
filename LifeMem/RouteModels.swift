@@ -116,9 +116,9 @@ struct RouteMemoryKey: Hashable {
     let value: String
     var previous: UUID?
 
-    init(owner: UUID, start: Date, visit: Bool) {
+    init(owner: UUID, start: Date) {
         self.owner = owner
-        value = "\(owner.uuidString)/\(visit ? "stay" : "move")/\(start.timeIntervalSinceReferenceDate.bitPattern)"
+        value = "\(owner.uuidString)/observation/\(start.timeIntervalSinceReferenceDate.bitPattern)"
     }
 
     init(arrival: UUID, departure: UUID) {

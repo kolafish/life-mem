@@ -43,13 +43,18 @@ private struct EntryNoteEditor: View {
     let title: String
     let time: String
     @State private var text: String
+    private enum Write { case draft, close, publish }
     @State private var saveError = false
+    @State private var failedWrite: Write = .draft
+    @State private var storedDraft: String
 
     init(key: RouteMemoryKey, title: String, time: String, memory: RouteMemory?) {
         self.key = key
         self.title = title
         self.time = time
-        _text = State(initialValue: memory?.draft ?? memory?.text ?? "")
+        let initial = memory?.draft ?? memory?.text ?? ""
+        _text = State(initialValue: initial)
+        _storedDraft = State(initialValue: initial)
     }
 
     var body: some View {
@@ -62,40 +67,44 @@ private struct EntryNoteEditor: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(.background, in: .rect(cornerRadius: 12))
-                    .onChange(of: text) { _, value in persist(value, asDraft: true) }
+                    .onChange(of: text) { _, value in persist(value, operation: .draft) }
             }
             .padding()
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("留一句话")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") {
+                    if text == storedDraft { dismiss() } else { persist(text, operation: .close) }
+                } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { if persist(text, asDraft: false) { dismiss() } }
+                    Button("保存") { persist(text, operation: .publish) }
                 }
             }
+            .interactiveDismissDisabled(text != storedDraft)
             .alert("未能保存文字", isPresented: $saveError) {
-                Button("重试") { persist(text, asDraft: true) }
+                Button("重试") { persist(text, operation: failedWrite) }
                 Button("继续编辑", role: .cancel) {}
             } message: { Text("请检查可用空间，文字仍在编辑框中。") }
         }
     }
 
-    @discardableResult private func persist(_ value: String, asDraft: Bool) -> Bool {
+    private func persist(_ value: String, operation: Write) {
         do {
             let memory = try key.memory(in: context)
-            if asDraft {
+            if operation != .publish {
                 memory.draft = value == memory.text ? nil : value
             } else {
                 memory.text = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 memory.draft = nil
             }
             try context.save()
-            return true
+            storedDraft = value
+            if operation != .draft { dismiss() }
         } catch {
             context.rollback()
+            failedWrite = operation
             saveError = true
-            return false
         }
     }
 }

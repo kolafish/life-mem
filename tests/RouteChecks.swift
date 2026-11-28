@@ -1725,6 +1725,32 @@ struct RouteChecks {
             precondition(review.journeys.map(\.mode) == expectedModes && indexed.journeys.map(\.mode) == expectedModes)
             precondition(review.days.flatMap(\.entries).filter { $0.kind == .trip }.count == expectedModes.count)
         }
+        let beforeMidnight = Calendar.current.startOfDay(for: start).timeIntervalSince(start)
+        let a = oldRoute(beforeMidnight - 400, [(0, 0, .automotive, true), (30, 0.003, .automotive, false)])
+        let b = oldRoute(beforeMidnight - 15, [(0, 0.003, .automotive, true), (30, 0.006, .automotive, false)], after: a)
+        try context.save()
+        let joined = RouteReview(routes: [a, b], calendar: .current)
+        let joinedKeys = joined.days.flatMap(\.entries).filter { $0.kind == .trip }.compactMap(\.memoryKey)
+        precondition(joined.journeys.count == 1 && joinedKeys.count == 2 && Set(joinedKeys).count == 1)
+
+        let changing = insertRoute(context: context, start: start, samples: [(0, 0, .unknown, true), (30, 0.0003, .unknown, false)])
+        try context.save()
+        let before = RouteReview(routes: [changing], calendar: .current).days[0].entries[0]
+        precondition(before.kind == .trip)
+        let memory = try before.memoryKey!.memory(in: context)
+        memory.text = "Original note"
+        memory.draft = "Original draft"
+        for seconds in stride(from: 60, through: 600, by: 30) {
+            context.insert(RoutePoint(location: location(longitude: 0.0003, at: start.addingTimeInterval(Double(seconds))),
+                                      mode: .unknown, startsNewSegment: false, route: changing))
+            changing.pointCount += 1
+        }
+        try context.save()
+        let after = RouteReview(routes: [changing], calendar: .current).days[0].entries[0]
+        precondition(after.kind == .visit)
+        let restored = try after.memoryKey!.memory(in: context)
+        precondition(restored.text == memory.text && restored.draft == memory.draft)
+
         let walking: [Sample] = [(0, 0, .walking, true), (30, 0.00035, .walking, false), (60, 0.0007, .walking, false)]
         let isolated = oldRoute(0, walking + stop(start: 90, longitude: 0.0007) + [(1_000, 0.04, .automotive, true)])
         let next = oldRoute(2_000, [(0, 0.04, .automotive, true), (30, 0.042, .automotive, false)], after: isolated)
