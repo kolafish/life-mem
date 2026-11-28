@@ -167,6 +167,11 @@ struct RouteJourney: Identifiable, Codable, Sendable {
     let mode: TravelMode
     var departureStay: StayConnection?
     var arrivalStay: StayConnection?
+    var modeDurations: [TravelMode: TimeInterval] = [:]
+
+    static func dominantMode(in durations: [TravelMode: TimeInterval]) -> TravelMode {
+        TravelMode.allCases.max { durations[$0, default: 0] < durations[$1, default: 0] } ?? .unknown
+    }
 }
 
 struct RouteVisit: Identifiable, Codable, Sendable {

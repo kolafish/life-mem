@@ -199,6 +199,9 @@ enum RouteStep {
 /// speed are common in a queue, so require displacement beyond the GPS error.
 struct ArrivalMotion {
     private(set) var mode: TravelMode = .unknown
+    private(set) var includesDriving = false
+    private(set) var walkOrigin: CLLocation?
+    private(set) var walkEnd: CLLocation?
     private var walkStart: CLLocation?
     private var lastWalk: Date?
 
@@ -210,6 +213,8 @@ struct ArrivalMotion {
                 if abs(fix.timestamp.timeIntervalSince(start.timestamp)) >= 15,
                    fix.distance(from: start) >= max(25, fix.horizontalAccuracy + start.horizontalAccuracy) {
                     self.mode = mode
+                    walkOrigin = start
+                    walkEnd = fix
                 }
             } else {
                 walkStart = fix
@@ -218,27 +223,54 @@ struct ArrivalMotion {
         case .unknown, .stationary, .automotive:
             walkStart = nil
             lastWalk = nil
-            if mode == .automotive { self.mode = mode }
+            if mode == .automotive {
+                self.mode = mode
+                includesDriving = true
+                walkOrigin = nil
+                walkEnd = nil
+            }
         }
     }
 
     var supportsVisit: Bool { mode == .walking || mode == .cycling }
+
+    /// With only GPS, slowing to walking speed can still be driving. A walk
+    /// back towards the parked vehicle gives independent evidence of a visit.
+    static func returnsTowards(_ parking: CLLocation?, from stop: CLLocation, to departure: CLLocation) -> Bool {
+        guard let parking else { return false }
+        return stop.distance(from: parking) - departure.distance(from: parking) >= max(8, parking.horizontalAccuracy + departure.horizontalAccuracy)
+    }
+
+    static func supportsVisit(arriving: Self, leaving: Self, at stop: CLLocation) -> Bool {
+        if arriving.includesDriving && leaving.includesDriving {
+            guard arriving.supportsVisit, leaving.supportsVisit, let departure = leaving.walkEnd else { return false }
+            return returnsTowards(arriving.walkEnd, from: stop, to: departure)
+        }
+        return arriving.supportsVisit || leaving.supportsVisit
+    }
 
     /// Scan outward from a stop, in either time direction. A signal gap
     /// cannot supply evidence about the approach on the other side.
     static func adjacent<S: Sequence, ID>(in points: S, from edge: LocationPoint<ID>) -> Self
     where S.Element == LocationPoint<ID> {
         var evidence = Self()
+        var closest: Self?
         var previous = edge
         for point in points {
             let later = point.timestamp > previous.timestamp ? point : previous
             let earlier = point.timestamp > previous.timestamp ? previous : point
             if point.timestamp != previous.timestamp, !later.continuesObservation(after: earlier) { break }
-            evidence.observe(point.mode, at: point.fix)
-            if evidence.mode != .unknown { break }
+            if closest == nil {
+                evidence.observe(point.mode, at: point.fix)
+                if evidence.mode != .unknown { closest = evidence }
+            }
+            if point.mode == .automotive {
+                closest?.includesDriving = true
+                break
+            }
             previous = point
         }
-        return evidence
+        return closest ?? evidence
     }
 }
 

@@ -39,7 +39,12 @@ final class AutomaticTrips {
             lastFix = last.fix
             lastMode = last.mode
             mode = last.mode
-            approach = ArrivalMotion.adjacent(in: ordered.reversed(), from: last)
+            var previous: LocationPoint<PersistentIdentifier>?
+            for point in ordered {
+                if let previous, !point.continuesObservation(after: previous) { approach = ArrivalMotion() }
+                approach.observe(point.mode, at: point.fix)
+                previous = point
+            }
             latestUpdate = max(last.timestamp, saved.automaticPauseAt ?? .distantPast)
             if approach.supportsVisit, last.mode == .stationary {
                 for point in ordered.reversed() {
@@ -68,9 +73,6 @@ final class AutomaticTrips {
         guard let location, CLLocationCoordinate2DIsValid(location.coordinate),
               (0...LocationSampling(mode: .unknown).maximumAccuracy).contains(location.horizontalAccuracy),
               time > (latestUpdate ?? .distantPast) else { return }
-        if let previous = latestUpdate, time.timeIntervalSince(previous) > LocationSampling.maximumGap {
-            dwellAnchor = nil
-        }
         if let previous = latestUpdate, time.timeIntervalSince(previous) >= Self.shortStop,
            let route, !route.isFinished {
             // Save the interruption provisionally. Radio silence alone cannot establish arrival.
@@ -78,6 +80,13 @@ final class AutomaticTrips {
         }
         latestUpdate = time
         if let route, !route.isFinished {
+            if let lastFix, time.timeIntervalSince(lastFix.timestamp) > LocationSampling.maximumGap {
+                approach = ArrivalMotion()
+                dwellAnchor = nil
+                observedArrival = false
+                speed = SpeedModeEstimate()
+                mode = .unknown
+            }
             let sampleMode = travelMode(for: location)
             if observedArrival, sampleMode != .stationary, let lastFix {
                 let distance = location.distance(from: lastFix)
@@ -86,8 +95,15 @@ final class AutomaticTrips {
                       distance >= max(25, lastFix.horizontalAccuracy + location.horizontalAccuracy) else { return }
                 // The full observed dwell belongs to the arriving route. Start the next
                 // recording at its last fix without drawing across an observation gap.
-                try close(route, at: nil, rejoinAfter: nil)
-                departureAnchor = lastFix
+                if supportsDeparture(from: lastFix, to: location) {
+                    try close(route, at: nil, rejoinAfter: nil)
+                    departureAnchor = lastFix
+                } else {
+                    observedArrival = false
+                    dwellAnchor = nil
+                    if append(location, mode: sampleMode, to: route) { try save() }
+                    return
+                }
             } else {
                 if sampleMode == .stationary, approach.supportsVisit {
                     if let anchor = dwellAnchor, location.distance(from: anchor) <= max(25, location.horizontalAccuracy) {
@@ -111,7 +127,7 @@ final class AutomaticTrips {
         let trip: RecordedRoute
         if let recent = route, let stopped = recent.automaticPauseAt,
            anchor.timestamp.timeIntervalSince(stopped) <= Self.maximumResumption,
-           (anchor.timestamp.timeIntervalSince(stopped) < Self.shortStop || !approach.supportsVisit),
+           (anchor.timestamp.timeIntervalSince(stopped) < Self.shortStop || !supportsDeparture(from: anchor, to: location)),
            let lastFix, anchor.distance(from: lastFix) <= 100 {
             trip = recent
         } else {
@@ -174,6 +190,17 @@ final class AutomaticTrips {
         mode = .unknown
     }
 
+    private func supportsDeparture(from stop: CLLocation, to fix: CLLocation) -> Bool {
+        guard approach.supportsVisit else { return false }
+        if !approach.includesDriving { return true }
+        if let activity = motionActivity, activity.since <= fix.timestamp {
+            if activity.mode == .walking || activity.mode == .cycling { return true }
+            if activity.mode == .automotive { return false }
+        }
+        if fix.speed >= 7.5, (0...3).contains(fix.speedAccuracy) { return false }
+        return ArrivalMotion.returnsTowards(approach.walkOrigin, from: stop, to: fix)
+    }
+
     private func travelMode(for fix: CLLocation) -> TravelMode {
         if let estimate = speed.observe(fix, currentMode: mode) { mode = estimate }
         guard let activity = motionActivity, activity.since <= fix.timestamp else { return mode }
@@ -197,6 +224,9 @@ final class AutomaticTrips {
         context.insert(point)
         route.pointCount += 1
         route.distanceMeters += step.distance
+        if lastFix.map({ fix.timestamp.timeIntervalSince($0.timestamp) > LocationSampling.maximumGap }) ?? true {
+            approach = ArrivalMotion()
+        }
         approach.observe(mode, at: fix)
         lastFix = fix
         lastMode = mode
