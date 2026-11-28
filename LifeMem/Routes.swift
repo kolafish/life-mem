@@ -116,7 +116,7 @@ struct RouteReview {
     }
 
     fileprivate init(contributions: [Contribution], calendar: Calendar) {
-        var entriesByDay: [Date: [RouteReviewEntry]] = [:]
+        var entriesByDay: [Date: [(UUID?, RouteReviewEntry)]] = [:]
         let resolved = ResolvedVisitGaps(contributions.compactMap { item in
             item.boundary.map { ($0, item.visits) }
         }, calendar: calendar)
@@ -131,23 +131,29 @@ struct RouteReview {
                         entry.endpoints = edges.names(for: contribution.boundary, endpoints: ends,
                                                       start: entry.startedAt, end: entry.endedAt)
                     }
-                    return entry
+                    return (contribution.boundary?.routeID, entry)
                 }
             }
         }
         for visit in inferred {
             for (day, stay) in visit.dailyInferredStays(calendar: calendar) {
-                entriesByDay[day, default: []].append(.init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay))
+                entriesByDay[day, default: []].append((nil, .init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
             RouteReviewDay(
                 date: date,
-                entries: entriesByDay[date, default: []].sorted { $0.startedAt < $1.startedAt }
+                entries: resolved.joinDriveLegs(entriesByDay[date, default: []], start: \.startedAt) { first, next in
+                    guard let from = first.endpoints, let to = next.endpoints else { return nil }
+                    return .init(kind: .trip, followsGap: first.followsGap, segments: first.segments + next.segments,
+                                 endpoints: from.continuing(to: to), stay: nil)
+                }
             )
         }
         places = RoutePlace.group(resolved.placeVisits(contributions.flatMap(\.visits)), within: Self.placeRadius)
-        journeys = contributions.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
+        journeys = resolved.journeys(contributions.flatMap { item in
+            item.journeys.map { (item.boundary?.routeID, edges.applying(to: $0, boundary: item.boundary)) }
+        })
     }
 
     static func summaryRecord(for route: RecordedRoute, calendar: Calendar) -> RouteSummaryRecord {
@@ -170,7 +176,8 @@ struct RouteReview {
                 session: session, start: start.timestamp, end: end.timestamp,
                 origin: StoredCoordinate(start.coordinate), destination: StoredCoordinate(end.coordinate),
                 startsWithVisit: first.visitCoordinate != nil, endsWithVisit: last.visitCoordinate != nil,
-                endedAtRest: route.endedAtRest == true, decision: route.arrivalDecision, name: route.arrivalName)
+                endedAtRest: route.endedAtRest == true,
+                decision: route.arrivalDecision, name: route.arrivalName)
         }
         for (index, slices) in runs.enumerated() {
             for (sliceIndex, slice) in slices.enumerated() {
@@ -228,9 +235,16 @@ struct RouteReview {
                 let arrival = trailing.flatMap { point in
                     nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
                 }
-                if var journey = Self.journey(in: completeSegments, points: slice.points, departure: previousCoordinate, arrival: arrival) {
+                if let result = Self.journey(in: completeSegments, points: slice.points, departure: previousCoordinate, arrival: arrival) {
+                    var journey = result.journey
                     if journey.departureStay != nil { journey.endpoints.startName = startName }
                     if journey.arrivalStay != nil { journey.endpoints.endName = endName }
+                    if index == 0, sliceIndex == 0, result.connectedStart {
+                        contribution.boundary?.startsDriving = ArrivalMotion.adjacent(in: slice.points, from: first).mode == .automotive
+                    }
+                    if index == runs.count - 1, sliceIndex == slices.count - 1, result.connectedEnd {
+                        contribution.boundary?.endsDriving = ArrivalMotion.adjacent(in: slice.points.reversed(), from: last).mode == .automotive
+                    }
                     contribution.journeys.append(journey)
                 }
             }
@@ -242,7 +256,7 @@ struct RouteReview {
         in segments: [RouteActivitySegment], points: ArraySlice<LocationPoint<PersistentIdentifier>>,
         departure: CLLocationCoordinate2D?,
         arrival: RouteJourney.StayConnection?
-    ) -> RouteJourney? {
+    ) -> (journey: RouteJourney, connectedStart: Bool, connectedEnd: Bool)? {
         let moving = segments.filter { $0.distanceMeters > 0 }
         guard let first = moving.first, let last = moving.last else { return nil }
         // A zero-distance fix can touch a visit even when the first measured movement is across a signal gap.
@@ -257,12 +271,13 @@ struct RouteReview {
         let durations = moving.reduce(into: [TravelMode: TimeInterval]()) {
             $0[$1.mode, default: 0] += $1.endedAt.timeIntervalSince($1.movementStartedAt)
         }
-        let mode = TravelMode.allCases.max { durations[$0, default: 0] < durations[$1, default: 0] } ?? .unknown
-        return RouteJourney(
+        let mode = RouteJourney.dominantMode(in: durations)
+        let journey = RouteJourney(
             id: first.id, endpoints: endpoints, departedAt: first.startedAt, duration: seconds, mode: mode,
             departureStay: departure.map { RouteJourney.StayConnection(coordinate: $0, time: first.startedAt) },
-            arrivalStay: arrival
+            arrivalStay: arrival, modeDurations: durations
         )
+        return (journey, !detachedStart, !detachedEnd)
     }
 
     private static func endpoints(
@@ -294,13 +309,15 @@ struct AutomaticVisitBoundary: Codable, Sendable {
     let endsWithVisit: Bool
     let endedAtRest: Bool
 
+    var startsDriving = false
+    var endsDriving = false
+
     var decision: String?
     var name: String?
 
-    static func candidates(in boundaries: [Self], calendar: Calendar) -> [RouteVisit] {
-        let sources = Dictionary(uniqueKeysWithValues: boundaries.map { ($0.routeID, $0) })
-        return boundaries.compactMap { departure in
-            guard departure.decision != "ignored", let previous = departure.previous, let arrival = sources[previous],
+    static func candidates(in sources: [UUID: Self], continuing: [UUID: UUID], calendar: Calendar) -> [RouteVisit] {
+        return sources.values.compactMap { departure in
+            guard continuing[departure.routeID] == nil, departure.decision != "ignored", let previous = departure.previous, let arrival = sources[previous],
                   arrival.endedAtRest, arrival.session == departure.session,
                   departure.decision == "confirmed" || (!arrival.endsWithVisit && !departure.startsWithVisit),
                   departure.start.timeIntervalSince(arrival.end) >= 8 * 60,
@@ -320,12 +337,23 @@ struct AutomaticVisitBoundary: Codable, Sendable {
 
 /// A confirmed gap remains editable after a new detector recognizes additional dwell on either edge.
 struct ResolvedVisitGaps {
+    private let continuing: [UUID: UUID]
     private(set) var incorporated = Set<PersistentIdentifier>()
     private(set) var gaps: [RouteVisit] = []
 
     init(_ routes: [(AutomaticVisitBoundary, [RouteVisit])], calendar: Calendar) {
         let byRoute = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.1) })
-        let candidates = AutomaticVisitBoundary.candidates(in: routes.map { $0.0 }, calendar: calendar)
+        let sources = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.0) })
+        continuing = Dictionary(uniqueKeysWithValues: sources.values.compactMap { next -> (UUID, UUID)? in
+            guard let id = next.previous, let previous = sources[id], next.session == previous.session,
+                  previous.endedAtRest, previous.endsDriving, next.startsDriving,
+                  !previous.endsWithVisit, !next.startsWithVisit, next.decision != "confirmed",
+                  (0...ArrivalMotion.maximumResumption).contains(next.start.timeIntervalSince(previous.end)),
+                  previous.destination.coordinate.location.distance(from: next.origin.coordinate.location) <= RouteReview.placeRadius
+            else { return nil }
+            return (next.routeID, id)
+        })
+        let candidates = AutomaticVisitBoundary.candidates(in: sources, continuing: continuing, calendar: calendar)
         for candidate in candidates.sorted(by: { $0.startedAt < $1.startedAt }) {
             guard candidate.isConfirmed else { gaps.append(candidate); continue }
             let before = candidate.sourceArrivalID.flatMap { byRoute[$0]?.last }
@@ -347,6 +375,32 @@ struct ResolvedVisitGaps {
             visit.sourceArrivalID = candidate.sourceArrivalID
             visit.sourceDepartureID = candidate.sourceDepartureID
             gaps.append(visit)
+        }
+    }
+
+    /// Join only explicitly linked neighbours, keeping every recorded geometry break.
+    func joinDriveLegs<T>(_ items: [(UUID?, T)], start: KeyPath<T, Date>, combine: (T, T) -> T?) -> [T] {
+        var result: [T] = []
+        var previousOwner: UUID?
+        for (owner, item) in items.sorted(by: { $0.1[keyPath: start] < $1.1[keyPath: start] }) {
+            if let owner, let previousOwner, continuing[owner] == previousOwner,
+               let index = result.indices.last, let joined = combine(result[index], item) {
+                result[index] = joined
+            } else {
+                result.append(item)
+            }
+            previousOwner = owner
+        }
+        return result
+    }
+
+    func journeys(_ items: [(UUID?, RouteJourney)]) -> [RouteJourney] {
+        joinDriveLegs(items, start: \.departedAt) { first, next in
+            let durations = first.modeDurations.merging(next.modeDurations, uniquingKeysWith: +)
+            return RouteJourney(id: first.id, endpoints: first.endpoints.continuing(to: next.endpoints), departedAt: first.departedAt,
+                                duration: next.departedAt.addingTimeInterval(next.duration).timeIntervalSince(first.departedAt),
+                                mode: RouteJourney.dominantMode(in: durations), departureStay: first.departureStay,
+                                arrivalStay: next.arrivalStay, modeDurations: durations)
         }
     }
 

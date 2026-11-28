@@ -9,6 +9,8 @@ struct RouteChecks {
         checkWeeklyVisits()
         try checkVisitCandidates()
         try checkAutomaticTrips()
+        try checkDrivingStops()
+        try checkLegacyDrivingEdges()
         checkMapProjection()
         let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3_600)
         let first = location(longitude: 0, at: start)
@@ -1538,17 +1540,16 @@ struct RouteChecks {
         try send(120, 0.0008, paused: true)
         try send(720, 0.0008)
         try send(750, 0.0012)
-        let second = trips.route!
-        precondition(first.isFinished && second.id != first.id && second.pointCount == 2)
+        precondition(trips.route?.id == first.id && !first.isFinished)
         trips = AutomaticTrips(context: context)
         trips.sessionStart = start
         try trips.restore(now: start.addingTimeInterval(755))
         try send(780, 0.0016)
-        precondition(trips.route?.id == second.id && second.pointCount == 3)
+        precondition(trips.route?.id == first.id)
         for t in stride(from: 810, through: 1320, by: 30) { try send(t, 0.0016) }
-        precondition(second.isFinished && trips.route == nil)
+        precondition(!first.isFinished && trips.route?.id == first.id)
         let saved = try context.fetch(FetchDescriptor<RecordedRoute>())
-        precondition(saved.count == 2 && !RouteReview(routes: saved, calendar: .current).days.isEmpty)
+        precondition(saved.count == 1 && !RouteReview(routes: saved, calendar: .current).days.isEmpty)
         try send(1500, 0.002)
         try send(1530, 0.0024)
         let stale = trips.route!
@@ -1559,6 +1560,163 @@ struct RouteChecks {
         let invalid = trips.route!
         try send(8500, 0.0030, paused: true, accuracy: 500)
         precondition(invalid.isFinished && invalid.endedAtRest != true)
+    }
+
+    @MainActor
+    private static func checkDrivingStops() throws {
+        // Feed the live recorder, reopen its archive, then check both the timeline and the index.
+        let start = Date(timeIntervalSince1970: 1_600_000_000)
+        func replay(shop: Bool, paused: Bool = false, creep: Double = 0, stopAndGo: Bool = false, restore: Bool = false, inVehicle: Bool = false, crawlBefore: Bool = false, crawlAfter: Bool = false, distantSignalLoss: Bool = false, latePause: Bool = false, resumeWhileMoving: Bool = false) throws {
+            let config = ModelConfiguration(isStoredInMemoryOnly: true)
+            let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: config)
+            var recorder = AutomaticTrips(context: store.mainContext)
+            recorder.sessionStart = start
+            if inVehicle { recorder.motionActivity = (.automotive, start) }
+            var time = start
+            var x = 0.0, y = 0.0
+            func fix(_ speed: Double, paused: Bool = false) throws {
+                let point = CLLocation(coordinate: .init(latitude: y / 111_195, longitude: x / 111_195), altitude: 0,
+                                       horizontalAccuracy: 5, verticalAccuracy: 5, course: -1, courseAccuracy: -1,
+                                       speed: speed, speedAccuracy: 0.5, timestamp: time)
+                try recorder.receive(point, stationary: paused, receivedAt: time)
+            }
+            func move(_ seconds: Int, east: Double = 0, north: Double = 0) throws {
+                for _ in stride(from: 0, to: seconds, by: 5) {
+                    time.addTimeInterval(5)
+                    x += east * 5
+                    y += north * 5
+                    try fix(hypot(east, north))
+                }
+            }
+            func reopen() throws {
+                recorder = AutomaticTrips(context: store.mainContext)
+                recorder.sessionStart = start
+                try recorder.restore(now: time)
+            }
+            try fix(10)
+            try move(240, east: 10)
+            if crawlBefore { try move(30); try move(50, east: 1) }
+            if shop {
+                try move(30)
+                try move(40, north: 1)
+                if distantSignalLoss {
+                    time.addTimeInterval(150)
+                    x += 3_000
+                }
+            }
+            if paused {
+                try move(25)
+                time.addTimeInterval(5)
+                try fix(0, paused: true)
+                time.addTimeInterval(870)
+                if restore { try reopen() }
+                try fix(0)
+            } else if stopAndGo {
+                for _ in 0..<15 { try move(50); try move(10, east: 1) }
+            } else {
+                try move(600, east: creep)
+                if restore { try reopen() }
+                try move(300, east: creep)
+            }
+            if latePause {
+                time.addTimeInterval(5)
+                try fix(0, paused: true)
+                time.addTimeInterval(25)
+                if restore { try reopen() }
+                if !resumeWhileMoving { try fix(0) }
+            }
+            if shop && !distantSignalLoss { try move(40, north: -1); try move(30) }
+            if crawlAfter { try move(50, east: 1) }
+            try move(240, east: 10)
+            try recorder.end()
+
+            let reader = ModelContext(store)
+            let routes = try reader.fetch(FetchDescriptor<RecordedRoute>())
+            let review = RouteReview(routes: routes, calendar: .current)
+            let index = RouteSummary(records: routes.map { RouteReview.summaryRecord(for: $0, calendar: .current) })
+            let entries = review.days.flatMap(\.entries)
+            let hasVisit = shop && !inVehicle && !distantSignalLoss
+            let expected = hasVisit ? 2 : 1
+            precondition(routes.count == expected && review.journeys.count == expected && index.journeys.count == expected,
+                         "shop=\(shop) paused=\(paused) latePause=\(latePause) restore=\(restore) raw=\(routes.count) cards=\(entries.map(\.kind))")
+            precondition(entries.map(\.kind) == (hasVisit ? [.trip, .visit, .trip] : [.trip]))
+            if hasVisit {
+                precondition((entries[1].stay?.isCandidate == true) == paused)
+            }
+        }
+        try replay(shop: false, stopAndGo: true)
+        try replay(shop: false, creep: 1.0 / 60)
+        try replay(shop: false)
+        try replay(shop: false, paused: true, restore: true)
+        try replay(shop: true)
+        try replay(shop: true, restore: true)
+        try replay(shop: true, paused: true, restore: true)
+        try replay(shop: true, inVehicle: true)
+        try replay(shop: true, distantSignalLoss: true)
+        try replay(shop: true, restore: true, distantSignalLoss: true)
+        try replay(shop: false, crawlBefore: true)
+        try replay(shop: false, crawlAfter: true)
+        try replay(shop: false, crawlBefore: true, crawlAfter: true)
+        try replay(shop: false, paused: true, crawlBefore: true, crawlAfter: true)
+        try replay(shop: false, crawlBefore: true, latePause: true)
+        try replay(shop: false, restore: true, crawlBefore: true, latePause: true)
+        try replay(shop: false, crawlBefore: true, latePause: true, resumeWhileMoving: true)
+        try replay(shop: false, restore: true, crawlBefore: true, latePause: true, resumeWhileMoving: true)
+        try replay(shop: true, latePause: true)
+        try replay(shop: true, restore: true, latePause: true)
+
+        // Earlier recorders wrote separate rows for the same vehicle stop.
+        let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = store.mainContext
+        let arrival = insertRoute(context: context, start: start, samples:
+            [(0, 0, .automotive, true), (30, 0.002, .automotive, false)] + stop(start: 60, longitude: 0.002))
+        let departure = insertRoute(context: context, start: start.addingTimeInterval(1_200), samples:
+            [(0, 0.002, .unknown, true), (10, 0.0028, .automotive, false), (40, 0.005, .automotive, false)])
+        for route in [arrival, departure] { route.isAutomatic = true; route.automaticSessionStart = start }
+        arrival.endedAtRest = true
+        departure.previousAutomaticRouteID = arrival.id
+        try context.save()
+        let routes = [departure, arrival]
+        let merged = RouteReview(routes: routes, calendar: .current)
+        precondition(merged.days.flatMap(\.entries).map(\.kind) == [.trip] && merged.journeys.count == 1)
+        precondition(RouteSummary(records: routes.map { RouteReview.summaryRecord(for: $0, calendar: .current) }).journeys.count == 1)
+        departure.arrivalDecision = "confirmed"
+        precondition(RouteReview(routes: routes, calendar: .current).days.flatMap(\.entries).map(\.kind) == [.trip, .visit, .trip])
+        departure.arrivalDecision = nil
+        departure.automaticSessionStart = start.addingTimeInterval(1_200)
+        precondition(RouteReview(routes: routes, calendar: .current).journeys.count == 2)
+    }
+
+    @MainActor
+    private static func checkLegacyDrivingEdges() throws {
+        let store = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = store.mainContext
+        let start = Date(timeIntervalSince1970: 1_600_000_000)
+        func oldRoute(_ seconds: Double, _ samples: [Sample], after previous: RecordedRoute? = nil) -> RecordedRoute {
+            let route = insertRoute(context: context, start: start.addingTimeInterval(seconds), samples: samples)
+            route.isAutomatic = true
+            route.automaticSessionStart = start
+            route.previousAutomaticRouteID = previous?.id
+            route.endedAtRest = true
+            return route
+        }
+        func verify(_ routes: [RecordedRoute], expectedModes: [TravelMode]) {
+            let review = RouteReview(routes: routes, calendar: .current)
+            let indexed = RouteSummary(records: routes.map { RouteReview.summaryRecord(for: $0, calendar: .current) })
+            precondition(review.journeys.map(\.mode) == expectedModes && indexed.journeys.map(\.mode) == expectedModes)
+            precondition(review.days.flatMap(\.entries).filter { $0.kind == .trip }.count == expectedModes.count)
+        }
+        let walking: [Sample] = [(0, 0, .walking, true), (30, 0.00035, .walking, false), (60, 0.0007, .walking, false)]
+        let isolated = oldRoute(0, walking + stop(start: 90, longitude: 0.0007) + [(1_000, 0.04, .automotive, true)])
+        let next = oldRoute(2_000, [(0, 0.04, .automotive, true), (30, 0.042, .automotive, false)], after: isolated)
+        verify([next, isolated], expectedModes: [.walking, .automotive])
+
+        let first = oldRoute(0, walking + [(90, 0.002, .automotive, false), (120, 0.004, .automotive, false)])
+        let middle = oldRoute(700, [(0, 0.004, .automotive, true), (20, 0.006, .automotive, false)], after: first)
+        var lastLeg: [Sample] = [(0, 0.006, .automotive, true), (10, 0.007, .automotive, false)]
+        lastLeg += stride(from: 30, through: 330, by: 30).map { (Double($0), 0.007 + Double($0) / 80_000, .walking, false) }
+        let last = oldRoute(1_400, lastLeg, after: middle)
+        verify([last, first, middle], expectedModes: [.walking])
     }
 
     private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {

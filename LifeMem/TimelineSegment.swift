@@ -16,6 +16,13 @@ struct RouteReviewEntry: Identifiable {
         var start: CLLocationCoordinate2D { origin.coordinate }
         var end: CLLocationCoordinate2D { destination.coordinate }
 
+        func continuing(to next: Self) -> Self {
+            var joined = Self(start: start, end: next.end)
+            joined.startName = startName
+            joined.endName = next.endName
+            return joined
+        }
+
         init(start: CLLocationCoordinate2D, end: CLLocationCoordinate2D) {
             origin = StoredCoordinate(start)
             destination = StoredCoordinate(end)
@@ -160,6 +167,11 @@ struct RouteJourney: Identifiable, Codable, Sendable {
     let mode: TravelMode
     var departureStay: StayConnection?
     var arrivalStay: StayConnection?
+    var modeDurations: [TravelMode: TimeInterval] = [:]
+
+    static func dominantMode(in durations: [TravelMode: TimeInterval]) -> TravelMode {
+        TravelMode.allCases.max { durations[$0, default: 0] < durations[$1, default: 0] } ?? .unknown
+    }
 }
 
 struct RouteVisit: Identifiable, Codable, Sendable {

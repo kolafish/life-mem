@@ -194,3 +194,103 @@ enum RouteStep {
         return false
     }
 }
+
+/// The last supported way of travelling into a stop. Short bursts at walking
+/// speed are common in a queue, so require displacement beyond the GPS error.
+struct ArrivalMotion {
+    static let maximumResumption: TimeInterval = 24 * 3600
+    static let resumptionRadius: CLLocationDistance = 100
+
+    private(set) var mode: TravelMode = .unknown
+    private(set) var includesDriving = false
+    private(set) var walkOrigin: CLLocation?
+    private(set) var walkEnd: CLLocation?
+    private var walkStart: CLLocation?
+    private var lastWalk: Date?
+
+    mutating func observe(_ mode: TravelMode, at fix: CLLocation) {
+        switch mode {
+        case .walking, .cycling:
+            if let start = walkStart, let lastWalk,
+               abs(fix.timestamp.timeIntervalSince(lastWalk)) <= LocationSampling.maximumGap {
+                if abs(fix.timestamp.timeIntervalSince(start.timestamp)) >= 15,
+                   fix.distance(from: start) >= max(25, fix.horizontalAccuracy + start.horizontalAccuracy) {
+                    self.mode = mode
+                    walkOrigin = start
+                    walkEnd = fix
+                }
+            } else {
+                walkStart = fix
+            }
+            lastWalk = fix.timestamp
+        case .unknown, .stationary, .automotive:
+            walkStart = nil
+            lastWalk = nil
+            if mode == .automotive {
+                self.mode = mode
+                includesDriving = true
+                walkOrigin = nil
+                walkEnd = nil
+            }
+        }
+    }
+
+    var supportsVisit: Bool { mode == .walking || mode == .cycling }
+
+    /// With only GPS, slowing to walking speed can still be driving. A walk
+    /// back towards the parked vehicle gives independent evidence of a visit.
+    static func returnsTowards(_ parking: CLLocation?, from stop: CLLocation, to departure: CLLocation) -> Bool {
+        guard let parking else { return false }
+        return stop.distance(from: parking) - departure.distance(from: parking) >= max(8, parking.horizontalAccuracy + departure.horizontalAccuracy)
+    }
+
+    static func supportsVisit(arriving: Self, leaving: Self, at stop: CLLocation) -> Bool {
+        if arriving.includesDriving && leaving.includesDriving {
+            guard arriving.supportsVisit, leaving.supportsVisit, let departure = leaving.walkEnd else { return false }
+            return returnsTowards(arriving.walkEnd, from: stop, to: departure)
+        }
+        return arriving.supportsVisit || leaving.supportsVisit
+    }
+
+    /// Scan outward from a stop, in either time direction. A signal gap
+    /// cannot supply evidence about the approach on the other side.
+    static func adjacent<S: Sequence, ID>(in points: S, from edge: LocationPoint<ID>, acrossResumption: Bool = false) -> Self
+    where S.Element == LocationPoint<ID> {
+        var evidence = Self()
+        var closest: Self?
+        var previous = edge
+        for point in points {
+            let later = point.timestamp > previous.timestamp ? point : previous
+            let earlier = point.timestamp > previous.timestamp ? previous : point
+            if point.timestamp != previous.timestamp, !later.continuesObservation(after: earlier) {
+                // A resumed automatic run still has a map break. Look at travel on
+                // its far side only if it restarts at the same observed position.
+                let gap = later.timestamp.timeIntervalSince(earlier.timestamp)
+                let distance = later.fix.distance(from: earlier.fix)
+                guard acrossResumption, later.startsRecordingRun == true, gap <= Self.maximumResumption,
+                      distance <= Self.resumptionRadius else { break }
+                evidence = Self()
+                // A late first fix may already be down the road. Vehicle evidence
+                // can rule out a stop across this gap, but cannot establish a walk.
+                let samePosition = distance <= max(25, later.accuracy, earlier.accuracy)
+                if closest == nil, gap > LocationSampling.maximumGap || !samePosition { closest = evidence }
+            }
+            if closest == nil {
+                evidence.observe(point.mode, at: point.fix)
+                if evidence.mode != .unknown { closest = evidence }
+            }
+            if point.mode == .automotive {
+                closest?.includesDriving = true
+                break
+            }
+            previous = point
+        }
+        return closest ?? evidence
+    }
+}
+
+extension LocationPoint {
+    var fix: CLLocation {
+        CLLocation(coordinate: coordinate, altitude: 0, horizontalAccuracy: accuracy, verticalAccuracy: -1, timestamp: timestamp)
+    }
+}
