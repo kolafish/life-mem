@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import HHTCore
 
 private struct TrackSample {
     let timestamp: Date
@@ -55,8 +56,12 @@ enum SegmentBuilder {
         }
     }
 
-    static func build<ID: Hashable>(_ points: [LocationPoint<ID>]) -> [[Slice<ID>]] {
-        cleanRuns(points.sorted { $0.timestamp < $1.timestamp }).map(timelineSlices)
+    static func build<ID: Hashable>(
+        _ points: [LocationPoint<ID>], automatic: Bool = false, namedVisitStarts: Set<ID> = []
+    ) -> [[Slice<ID>]] {
+        cleanRuns(points.sorted { $0.timestamp < $1.timestamp }, automatic: automatic).map {
+            timelineSlices($0, namedVisitStarts: namedVisitStarts)
+        }
     }
 
     static func group<ID: Hashable>(
@@ -72,7 +77,9 @@ enum SegmentBuilder {
             let seconds = previousPoint.map { point.timestamp.timeIntervalSince($0.timestamp) }
             if let seconds, !seconds.isFinite || seconds <= 0 { continue }
             let distance = previousPoint.map { measuredDistance(from: $0, to: point) } ?? 0
-            let startsDrawingSegment = point.startsNewSegment && (leadingStayPoint == nil || !segments.isEmpty)
+            let observationGap = seconds.map { $0 > LocationSampling.maximumGap } ?? false
+            let startsDrawingSegment = observationGap || point.startsRecordingRun == true ||
+                (point.startsNewSegment && (leadingStayPoint == nil || !segments.isEmpty))
             let mode: TravelMode
             if inferModes, point.mode == .unknown, distance > 0, let seconds, !startsDrawingSegment {
                 mode = TravelMode.estimated(metersPerSecond: distance / seconds)
@@ -109,7 +116,7 @@ enum SegmentBuilder {
         if let trailingStayPoint, let previousPoint, let last = segments.indices.last, segments[last].mode != .stationary {
             let seconds = trailingStayPoint.timestamp.timeIntervalSince(previousPoint.timestamp)
             let distance = measuredDistance(from: previousPoint, to: trailingStayPoint)
-            if seconds.isFinite, seconds > 0, distance > 0 {
+            if seconds > 0, seconds <= LocationSampling.maximumGap, trailingStayPoint.startsRecordingRun != true, distance > 0 {
                 if inferModes, segments[last].mode == .unknown {
                     segments[last].mode = TravelMode.estimated(metersPerSecond: distance / seconds)
                 }
@@ -173,7 +180,7 @@ enum SegmentBuilder {
         return meters >= noise ? meters : 0
     }
 
-    private static func cleanRuns<ID: Hashable>(_ points: [LocationPoint<ID>]) -> [[LocationPoint<ID>]] {
+    private static func cleanRuns<ID: Hashable>(_ points: [LocationPoint<ID>], automatic: Bool) -> [[LocationPoint<ID>]] {
         var runs: [[LocationPoint<ID>]] = []
         var run: [LocationPoint<ID>] = []
         var previousObserved: LocationPoint<ID>?
@@ -181,7 +188,9 @@ enum SegmentBuilder {
             if let previousObserved {
                 let changesStationary = (point.mode == .stationary) != (previousObserved.mode == .stationary)
                 // Early versions also used the drawing flag for changes to and from stationary.
-                let boundary = point.startsRecordingRun ?? (point.startsNewSegment && !changesStationary)
+                let legacyPause = point.startsNewSegment && !changesStationary &&
+                    point.timestamp.timeIntervalSince(previousObserved.timestamp) <= LocationSampling.maximumGap
+                let boundary = !automatic && (point.startsRecordingRun ?? legacyPause)
                 if boundary, !run.isEmpty {
                     runs.append(run)
                     run = []
@@ -193,10 +202,8 @@ enum SegmentBuilder {
             if let previous = run.last {
                 let seconds = point.timestamp.timeIntervalSince(previous.timestamp)
                 guard seconds > 0 else { continue }
-                if seconds > LocationSampling.maximumGap {
-                    runs.append(run)
-                    run = []
-                } else if point.coordinate.location.distance(from: previous.coordinate.location) / seconds > LocationSampling.speedLimit {
+                if seconds <= LocationSampling.maximumGap,
+                   point.coordinate.location.distance(from: previous.coordinate.location) / seconds > LocationSampling.speedLimit {
                     continue
                 }
             }
@@ -206,66 +213,75 @@ enum SegmentBuilder {
         return runs
     }
 
-    private static func timelineSlices<ID: Hashable>(_ run: [LocationPoint<ID>]) -> [Slice<ID>] {
+    private static func timelineSlices<ID: Hashable>(
+        _ run: [LocationPoint<ID>], namedVisitStarts: Set<ID>
+    ) -> [Slice<ID>] {
         var slices: [Slice<ID>] = []
-        var start = run.startIndex
-        var candidate = start
-        while candidate < run.endIndex {
-            let first = run[candidate]
-            guard isStayCandidate(first) else {
-                candidate += 1
-                continue
+        var movementStart = run.startIndex
+        var next = run.startIndex
+        while next < run.endIndex {
+            let start = next
+            next += 1
+            guard canBeAtPlace(run[start]) else { continue }
+            // Only uninterrupted observations establish dwell time. A saved visit edit owns its first sample.
+            while next < run.endIndex, canBeAtPlace(run[next]), !namedVisitStarts.contains(run[next].id),
+                  run[next].continuesObservation(after: run[next - 1]) {
+                next += 1
             }
-            let anchor = first.coordinate.location
-            var end = candidate + 1
-            while end < run.endIndex {
-                let point = run[end]
-                guard isStayCandidate(point) else { break }
-                let distance = point.coordinate.location.distance(from: anchor)
-                if distance > stayRadius {
-                    let next = end + 1
-                    guard distance <= stayRadius + point.accuracy, next < run.endIndex,
-                          isStayCandidate(run[next]),
-                          run[next].timestamp.timeIntervalSince(run[end - 1].timestamp) <= LocationSampling.maximumGap,
-                          run[next].coordinate.location.distance(from: anchor) <= stayRadius else { break }
-                }
-                end += 1
+            let window = run[start..<next]
+            guard run[next - 1].timestamp.timeIntervalSince(run[start].timestamp) >= minimumVisitDuration else { continue }
+            for (range, center) in observedStays(in: window, preserveNamedStart: namedVisitStarts.contains(run[start].id)) {
+                if movementStart < range.lowerBound { slices.append(.move(run[movementStart..<range.lowerBound])) }
+                slices.append(.stay(run[range], center: center))
+                movementStart = range.upperBound
             }
-            guard run[end - 1].timestamp.timeIntervalSince(first.timestamp) >= minimumVisitDuration else {
-                candidate += 1
-                continue
-            }
-            if start < candidate { slices.append(.move(run[start..<candidate])) }
-            let points = run[candidate..<end]
-            slices.append(.stay(points, center: center(of: points, near: first.coordinate)))
-            start = end
-            candidate = end
         }
-        if start < run.endIndex { slices.append(.move(run[start...])) }
+        if movementStart < run.endIndex { slices.append(.move(run[movementStart...])) }
         return slices
     }
 
-    private static func isStayCandidate<ID: Hashable>(_ point: LocationPoint<ID>) -> Bool {
+    private static func canBeAtPlace<ID>(_ point: LocationPoint<ID>) -> Bool {
         point.mode == .stationary || point.mode == .unknown
     }
 
-    private static func center<ID: Hashable>(of points: ArraySlice<LocationPoint<ID>>, near anchor: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
-        let anchorLocation = anchor.location
-        var latitude = 0.0
-        var longitudeOffset = 0.0
-        var weight = 0.0
-        for point in points where point.coordinate.location.distance(from: anchorLocation) <= stayRadius {
-            let confidence = 1 / max(point.accuracy, 5)
-            let delta = (point.coordinate.longitude - anchor.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
-            latitude += point.coordinate.latitude * confidence
-            longitudeOffset += delta * confidence
-            weight += confidence
+    private static func observedStays<ID>(
+        in points: ArraySlice<LocationPoint<ID>>, preserveNamedStart: Bool
+    ) -> [(Range<Int>, CLLocationCoordinate2D)] {
+        let first = points[points.startIndex]
+        let last = points[points.endIndex - 1]
+        let meridian = first.coordinate.longitude
+        // HHTCore uses a local arithmetic centroid. Centre the longitude axis so a stay can span ±180°.
+        func wrapped(_ longitude: Double) -> Double {
+            if (-180...180).contains(longitude) { return longitude }
+            return (longitude + 540).truncatingRemainder(dividingBy: 360) - 180
         }
-        let longitude = anchor.longitude + longitudeOffset / weight
-        if (-180...180).contains(longitude) {
-            return CLLocationCoordinate2D(latitude: latitude / weight, longitude: longitude)
+        let fixes = points.map { point in
+            RawPoint(timestamp: point.timestamp,
+                     coordinate: Coordinate(point.coordinate.latitude, wrapped(point.coordinate.longitude - meridian)),
+                     horizontalAccuracy: point.accuracy, timeZone: nil)
         }
-        let wrapped = (longitude + 540).truncatingRemainder(dividingBy: 360) - 180
-        return CLLocationCoordinate2D(latitude: latitude / weight, longitude: wrapped)
+        var config = InferenceConfig.default
+        config.stayRadius = stayRadius
+        config.minStayDuration = minimumVisitDuration
+        config.maxHorizontalAccuracy = LocationSampling.accuracyLimit
+        var stays = StayDetector(config: config).detect(fixes, now: last.timestamp)
+        if preserveNamedStart, stays.first?.start != first.timestamp {
+            // Older releases stored a correction on the first observed fix, including approach-edge fixes.
+            // Keep that fix as the edit owner when the full cluster supports the previously named visit.
+            config.stayCoreRadius = config.stayRadius
+            stays = StayDetector(config: config).detect(fixes, now: last.timestamp)
+        }
+        var cursor = points.startIndex
+        return stays.compactMap { stay in
+            while cursor < points.endIndex, points[cursor].timestamp < stay.start { cursor += 1 }
+            let start = cursor
+            let end = stay.end ?? last.timestamp
+            while cursor < points.endIndex, points[cursor].timestamp <= end { cursor += 1 }
+            guard start < cursor,
+                  points[cursor - 1].timestamp.timeIntervalSince(points[start].timestamp) >= minimumVisitDuration else { return nil }
+            let center = CLLocationCoordinate2D(latitude: stay.centroid.latitude,
+                                                longitude: wrapped(stay.centroid.longitude + meridian))
+            return (start..<cursor, center)
+        }
     }
 }
