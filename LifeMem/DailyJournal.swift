@@ -33,6 +33,13 @@ private struct DailyJournal: View {
     @AppStorage("matchDayPhotos") private var matchPhotos = false
     @State private var playback = MemoPlayback()
     @State private var mapFocus = UUID()
+    @State private var voiceTarget: VoiceTarget?
+
+    private struct VoiceTarget: Identifiable {
+        let id = UUID()
+        let photo: GalleryPhoto
+        let key: RouteMemoryKey
+    }
 
     var body: some View {
         let dates = day.journalAttachmentDays(in: review?.days ?? [day])
@@ -64,7 +71,10 @@ private struct DailyJournal: View {
                                 .accessibilityAddTraits(.isHeader)
                         }
                         if let key = entry.memoryKey {
-                            JournalMemories(key: key, day: day.date, dates: dates[key] ?? [day.date], playback: playback)
+                            JournalMemories(key: key, day: day.date, dates: dates[key] ?? [day.date], playback: playback) { photo in
+                                playback.stop()
+                                voiceTarget = VoiceTarget(photo: photo, key: key)
+                            }
                         }
                     }
                     .padding(.bottom, 18)
@@ -76,6 +86,7 @@ private struct DailyJournal: View {
         .background(Color(uiColor: .systemBackground))
         .modifier(DayPhotoSource(day: day, library: library, enabled: matchPhotos))
         .modifier(MemoPlaybackLifecycle(playback: playback))
+        .sheet(item: $voiceTarget) { target in PhotoVoiceEditor(photo: target.photo, key: target.key) }
     }
 }
 
@@ -89,9 +100,10 @@ private struct JournalMemories: View {
     @Environment(\.dayLibrary) private var library
     @Environment(\.calendar) private var calendar
     @Environment(\.colorScheme) private var scheme
-    @State private var selectedPhoto: GalleryPhoto?
+    let openPhoto: (GalleryPhoto) -> Void
 
-    init(key: RouteMemoryKey, day: Date, dates: [Date], playback: MemoPlayback) {
+    init(key: RouteMemoryKey, day: Date, dates: [Date], playback: MemoPlayback, openPhoto: @escaping (GalleryPhoto) -> Void) {
+        self.openPhoto = openPhoto
         self.key = key
         self.day = day
         self.dates = dates
@@ -108,10 +120,7 @@ private struct JournalMemories: View {
         let photos = GalleryPhoto.visible(attachments: attachments, key: key, libraryContext: library)
         ForEach(photos.filter { RouteReviewDay.journalDay(for: $0.taken, on: dates, calendar: calendar) == day }, id: \.journalID) { photo in
             VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    playback.stop()
-                    selectedPhoto = photo
-                } label: {
+                Button { openPhoto(photo) } label: {
                     photo.journalImage
                         .clipShape(.rect(cornerRadius: 10))
                         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder((scheme == .dark ? Color.white : .black).opacity(0.10)) }
@@ -128,7 +137,6 @@ private struct JournalMemories: View {
                 }
             }.padding(.top, 12)
         }
-        .sheet(item: $selectedPhoto) { photo in PhotoVoiceEditor(photo: photo, key: key) }
     }
 }
 
