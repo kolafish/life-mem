@@ -424,20 +424,24 @@ struct RouteDayReviewView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
-                    DailySummaryCard(day: day)
-                    DayPhotoControls(enabled: $matchDayPhotos, library: photoLibrary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        DailySummaryCard(day: day)
+                        DayPhotoControls(enabled: $matchDayPhotos, library: photoLibrary)
+                    }
                     Section {
                         ForEach(day.entries) { entry in
-                            if entry.followsGap {
-                                Label("记录中断", systemImage: "ellipsis")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 12)
-                            }
-                            TimelineSegmentRow(entry: entry, selected: selection.id == entry.id) {
-                                selection.focus(entry.id)
-                            } nameTarget: { target in
-                                namingTarget = target
+                            VStack(alignment: .leading, spacing: 12) {
+                                if entry.followsGap {
+                                    Label("记录中断", systemImage: "ellipsis")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 12)
+                                }
+                                TimelineSegmentRow(entry: entry, selected: selection.id == entry.id) {
+                                    selection.focus(entry.id)
+                                } nameTarget: { target in
+                                    namingTarget = target
+                                }
                             }
                             .id(entry.id)
                         }
