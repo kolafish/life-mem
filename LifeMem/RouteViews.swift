@@ -340,6 +340,7 @@ struct RecordedVisitDestination: View {
         Group {
             if let day, let entry = day.entries.first(where: { $0.stay?.visitID == visit.id }) {
                 RouteDayReviewView(day: day, focus: entry.id, allowsAutomaticLookup: false).environment(\.currentRouteReview, nil)
+                    .accessibilityIdentifier("memory-source-\(Int(date.timeIntervalSince1970))")
             } else if loaded {
                 ContentUnavailableView("这次到访已更新", systemImage: "calendar")
             } else { ProgressView() }

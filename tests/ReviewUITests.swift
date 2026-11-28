@@ -56,7 +56,7 @@ final class ReviewUITests: XCTestCase {
 
     func testPreviousAndFirstSourceOpenTheCorrectOccurrence() {
         let app = launch(fixture: "day")
-        let office = app.buttons.matching(identifier: "today-entry")
+        let office = app.buttons.matching(identifier: "today-stop")
             .matching(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
         scrollTo(office, in: app)
         office.tap()
@@ -64,15 +64,30 @@ final class ReviewUITests: XCTestCase {
         scrollTo(last, in: app)
         last.tap()
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))!
-        let id = "review-date-\(Int(yesterday.timeIntervalSince1970))"
+        let id = "memory-source-\(Int(yesterday.timeIntervalSince1970))"
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: id).firstMatch.waitForExistence(timeout: 5))
         let selected = app.buttons.matching(identifier: "timeline-entry").matching(NSPredicate(format: "isSelected == true")).firstMatch
         XCTAssertTrue(selected.label.contains("测试办公室"))
+    }
+
+    func testFirstVisitOpensSourceFromDailyReview() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["回顾"].tap()
+        let yesterdayRow = app.buttons.matching(identifier: "review-day").element(boundBy: 1)
+        XCTAssertTrue(yesterdayRow.waitForExistence(timeout: 5))
+        yesterdayRow.tap()
+        let office = app.buttons.matching(identifier: "timeline-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试办公室", "→")).firstMatch
+        scrollTo(office, in: app)
+        office.tap()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))!
+        let source = app.descendants(matching: .any).matching(identifier: "memory-source-\(Int(yesterday.timeIntervalSince1970))").firstMatch
+        XCTAssertFalse(source.exists)
         let first = app.buttons.matching(identifier: "visit-memory").matching(NSPredicate(format: "label CONTAINS %@", "首次")).firstMatch
         scrollTo(first, in: app)
         first.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: id).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(selected.label.contains("测试办公室"))
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertTrue(office.isSelected)
     }
 
     func testTodayShowsStopsAndOpensSelectedEntry() {

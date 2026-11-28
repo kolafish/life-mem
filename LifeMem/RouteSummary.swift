@@ -147,10 +147,12 @@ actor RouteSummaryIndex {
 }
 
 actor ArchiveSummaryReader {
+    private var pendingSave: Task<Void, Never>?
     private var lastCalendar: Calendar?
     private var records: [RouteReviewRevision.RouteVersion: RouteSummaryRecord] = [:]
 
     func load(_ revision: RouteReviewRevision, container: ModelContainer, index: RouteSummaryIndex) async throws -> RouteSummary? {
+        pendingSave?.cancel()
         let disk = await index.records(for: revision)
         try Task.checkCancellation()
         let context = ModelContext(container)
@@ -174,7 +176,7 @@ actor ArchiveSummaryReader {
         records = updated
         let summary = RouteSummary(records: revision.routes.compactMap { updated[$0] }, calendar: revision.calendar)
         try Task.checkCancellation()
-        await index.save(updated, for: revision)
+        pendingSave = Task { [updated] in await index.save(updated, for: revision, after: .seconds(1)) }
         return summary
     }
 }

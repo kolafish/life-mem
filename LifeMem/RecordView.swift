@@ -89,7 +89,7 @@ struct RecordView: View {
                                 ReviewTextRow(title: name, detail: nil, time: clockRange(entry.startedAt, entry.endedAt))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .accessibilityIdentifier("today-entry")
+                            .accessibilityIdentifier(entry.stay == nil ? "today-entry" : "today-stop")
                             if let stay = entry.stay { VisitMemoryLink(stay: stay) }
                         }
                     }
