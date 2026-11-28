@@ -41,7 +41,12 @@ final class RecordedRoute {
         let descriptor = FetchDescriptor<RouteMemory>(predicate: #Predicate {
             $0.owner?.id == routeID || $0.previous?.id == routeID
         })
-        for memory in try context.fetch(descriptor) { context.delete(memory) }
+        for memory in try context.fetch(descriptor) {
+            let key = memory.key
+            let photos = FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.memory?.key == key })
+            for photo in try context.fetch(photos) { context.delete(photo) }
+            context.delete(memory)
+        }
         let points = FetchDescriptor<RoutePoint>(predicate: #Predicate { $0.route?.id == routeID })
         for point in try context.fetch(points) { context.delete(point) }
         context.delete(self)
@@ -183,15 +188,45 @@ final class RouteMemory {
     @Attribute(.unique) var key: String
     var text: String
     var draft: String?
+    @Relationship(deleteRule: .cascade, inverse: \MemoryPhoto.memory)
+    var photos: [MemoryPhoto]?
     var owner: RecordedRoute?
     var previous: RecordedRoute?
 
-    var isAnnotated: Bool { !text.isEmpty || draft != nil }
+    var isAnnotated: Bool { !text.isEmpty || draft != nil || photos?.contains(where: { !$0.hidden }) == true }
 
     init(key: String, owner: RecordedRoute, previous: RecordedRoute?) {
         self.key = key
         self.owner = owner
         self.previous = previous
         text = ""
+    }
+}
+
+@Model
+final class MemoryPhoto {
+    var id: UUID
+    var added: Date
+    var taken: Date?
+    var latitude: Double?
+    var longitude: Double?
+    var assetID: String?
+    var hidden: Bool
+    @Attribute(.externalStorage) var image: Data?
+    @Attribute(.externalStorage) var thumbnail: Data?
+    var memory: RouteMemory?
+
+    init(memory: RouteMemory, assetID: String?) {
+        id = UUID()
+        added = .now
+        hidden = false
+        self.memory = memory
+        self.assetID = assetID
+    }
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let latitude, let longitude else { return nil }
+        let point = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        return CLLocationCoordinate2DIsValid(point) ? point : nil
     }
 }

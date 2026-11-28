@@ -382,6 +382,7 @@ struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var photoRequest: PhotoMapRequest?
     @State private var expandedMap = false
     @State private var scrollAfterMap: RouteReviewEntry.ID?
     @State private var selection: Selection
@@ -409,6 +410,14 @@ struct RouteDayReviewView: View {
     var body: some View {
         let canLookUp = scenePhase == .active && allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil
         let selected = day.entries.first { $0.id == selection.id }
+        let photoActions = DayPhotoActions(entries: day.entries, name: { entry in
+            day.title(for: entry) { placeResolver.label(near: $0, names: placeNames) }
+        }, showMap: { request in
+            selection.focus(request.entryID)
+            scrollAfterMap = request.entryID
+            photoRequest = request
+            expandedMap = true
+        })
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
@@ -463,24 +472,29 @@ struct RouteDayReviewView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
+            .modifier(DayPhotoPicker())
             .fullScreenCover(isPresented: $expandedMap, onDismiss: {
                 if let id = scrollAfterMap {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
                 }
                 scrollAfterMap = nil
+                photoRequest = nil
             }) {
                 NavigationStack {
-                    RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request) { id in
-                        selection.focus(id)
-                        scrollAfterMap = id
-                    }
-                    .safeAreaInset(edge: .bottom) {
-                        if let selected {
-                            TimelineSegmentRow(entry: selected, selected: false, showMemoryActions: true) {
-                                selection.focus(selected.id)
-                            } nameTarget: { _ in }
-                            .padding(8)
-                            .background(.regularMaterial)
+                    GeometryReader { area in
+                        RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request, photo: photoRequest?.coordinate) { id in
+                            photoRequest = nil
+                            selection.focus(id)
+                            scrollAfterMap = id
+                        }
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if let selected {
+                                ViewThatFits(in: .vertical) {
+                                    mapCard(selected).fixedSize(horizontal: false, vertical: true)
+                                    ScrollView { mapCard(selected) }
+                                }
+                                .frame(maxHeight: area.size.height * 0.42, alignment: .bottom)
+                            }
                         }
                     }
                     .navigationTitle("当天地图")
@@ -490,15 +504,17 @@ struct RouteDayReviewView: View {
                             Button("返回时间线") { expandedMap = false }
                         }
                         ToolbarItem(placement: .primaryAction) {
-                            Button("显示全天") { selection.focus(nil); scrollAfterMap = nil }
+                            Button("显示全天") { photoRequest = nil; selection.focus(nil); scrollAfterMap = nil }
                         }
                     }
                 }
+                .modifier(DayPhotoPicker())
             }
             .task {
                 if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }
             }
         }
+        .environment(\.dayPhotoActions, photoActions)
         .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
@@ -515,6 +531,15 @@ struct RouteDayReviewView: View {
             )
         }
     }
+
+    private func mapCard(_ entry: RouteReviewEntry) -> some View {
+        TimelineSegmentRow(entry: entry, selected: false, showMemoryActions: true) {
+            selection.focus(entry.id)
+        } nameTarget: { _ in }
+        .padding(8)
+        .background(.regularMaterial)
+    }
+
 }
 
 struct RouteDetailView: View {

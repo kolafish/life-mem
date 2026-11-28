@@ -48,7 +48,7 @@ struct TimelineSegmentRow: View {
             .accessibilityIdentifier("timeline-entry")
             .accessibilityAddTraits(selected ? .isSelected : [])
             if let key = entry.memoryKey {
-                EntryMemoryView(key: key, title: title(for: entry), time: clockRange(entry.startedAt, entry.endedAt), selected: selected || showMemoryActions)
+                EntryMemoryView(entry: entry, key: key, title: title(for: entry), time: clockRange(entry.startedAt, entry.endedAt), selected: selected || showMemoryActions)
             }
             if selected {
                 if moves.count > 1 {

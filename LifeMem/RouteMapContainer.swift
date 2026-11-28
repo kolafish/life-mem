@@ -5,6 +5,7 @@ struct RouteMapContainer: View {
     let entries: [RouteReviewEntry]
     let selected: RouteReviewEntry?
     let focusRequest: UUID
+    var photo: CLLocationCoordinate2D? = nil
     let selectEntry: (RouteReviewEntry.ID) -> Void
 
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -25,7 +26,9 @@ struct RouteMapContainer: View {
     var body: some View {
         MapReader { proxy in
             Map(position: $position, interactionModes: [.pan, .zoom]) {
-                ForEach(stayMarkers) { group in
+                ForEach(stayMarkers.filter { group in
+                    photo.map { MKMapPoint($0).distance(to: MKMapPoint(group.coordinate)) > 18 } ?? true
+                }) { group in
                     Annotation("停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
                         stayMarker(group)
                     }
@@ -48,18 +51,37 @@ struct RouteMapContainer: View {
                             .annotationTitles(.hidden)
                         }
                     }
-                    if selected?.id == entry.id, entry.kind == .trip {
+                    if photo == nil, selected?.id == entry.id, entry.kind == .trip {
                         tripMarkers(entry)
                     }
+                }
+                if let photo {
+                    Annotation("拍摄位置", coordinate: RouteMapProjection.standard.coordinate(for: photo), anchor: .bottom) {
+                        VStack(spacing: 0) {
+                            Label("拍摄位置", systemImage: "camera.fill")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 9).padding(.vertical, 6)
+                                .foregroundStyle(.white).background(.purple, in: .capsule)
+                            Rectangle().fill(.purple).frame(width: 2, height: 8)
+                            Circle().fill(.purple).frame(width: 6, height: 6)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("拍摄位置")
+                        .accessibilityIdentifier("photo-map-pin")
+                    }
+                    .annotationTitles(.hidden)
                 }
             }
             .mapStyle(.standard(emphasis: .muted))
             .accessibilityIdentifier("daily-route-map")
             .onChange(of: Viewport(selection: selected?.id, request: focusRequest), initial: true) {
-                position = selected.map(camera(for:)) ?? .automatic
+                if let photo {
+                    position = .region(MKCoordinateRegion(center: RouteMapProjection.standard.coordinate(for: photo),
+                                                          latitudinalMeters: 240, longitudinalMeters: 240))
+                } else { position = selected.map(camera(for:)) ?? .automatic }
             }
             .onChange(of: selected?.endedAt) {
-                if let selected, !position.positionedByUser { position = camera(for: selected) }
+                if photo == nil, let selected, !position.positionedByUser { position = camera(for: selected) }
             }
             .simultaneousGesture(SpatialTapGesture().onEnded { tap in
                 if let id = trip(at: tap.location, proxy: proxy) { selectEntry(id) }

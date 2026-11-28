@@ -126,6 +126,12 @@ struct RouteChecks {
         let retainedOwner = try fresh.fetch(FetchDescriptor<RecordedRoute>()).first { $0.id == protected.id }
         let retainedNote = try key.memory(in: fresh)
         precondition(retainedOwner?.points.count == 2 && retainedNote.draft == "retried")
+        _ = retainedNote.photos?.count
+        try key.update(in: container) { memory, writer in
+            let photo = MemoryPhoto(memory: memory, assetID: "cross-context-photo")
+            photo.image = Data(repeating: 7, count: 200_000)
+            writer.insert(photo)
+        }
         let originalPointIDs = Set(protected.points.map(\.persistentModelID))
         try protected.deleteWithMemories(in: context)
         try context.save()
@@ -133,6 +139,8 @@ struct RouteChecks {
         let keyValue = key.value
         let orphanCount = try afterRemoval.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == keyValue }))
         let pointsAfterRemoval = try afterRemoval.fetch(FetchDescriptor<RoutePoint>())
+        let orphanPhotos = try afterRemoval.fetchCount(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == "cross-context-photo" }))
+        precondition(orphanPhotos == 0)
         precondition(orphanCount == 0 && pointsAfterRemoval.allSatisfy { !originalPointIDs.contains($0.persistentModelID) })
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
@@ -720,12 +728,22 @@ struct RouteChecks {
         let isolatedKey = RouteReview(routes: [isolatedRoute], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
         let other = try isolatedKey.memory(in: context)
         precondition(other.text.isEmpty)
+        let attachment = MemoryPhoto(memory: other, assetID: "synthetic-photo")
+        attachment.thumbnail = Data([1, 2, 3])
+        context.insert(attachment)
+        try context.save()
+        precondition(other.isAnnotated)
+        attachment.hidden = true
+        precondition(!other.isAnnotated)
+        attachment.hidden = false
         try context.save()
         context.delete(isolatedRoute)
         try context.save()
         let removedKey = isolatedKey.value
         let count = try context.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == removedKey }))
         precondition(count == 0)
+        let survivingPhotos = try context.fetchCount(FetchDescriptor<MemoryPhoto>())
+        precondition(survivingPhotos == 0)
         precondition(departureDays[0].moves[0].coordinates.first?.longitude == departureDays[1].moves[0].coordinates.last?.longitude)
         let arrivalDays = RouteReview(routes: [midnightArrival], calendar: calendar).days
         precondition(arrivalDays.map(\.movingDuration) == [10, 40])
