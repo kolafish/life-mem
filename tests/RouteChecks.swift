@@ -1195,6 +1195,23 @@ struct RouteChecks {
     }
 
     private static func checkWeeklyVisits() {
+        var pacific = Calendar(identifier: .gregorian)
+        pacific.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        pacific.firstWeekday = 1
+        let sunday = pacific.date(from: DateComponents(year: 2026, month: 3, day: 8))!
+        let spring = (0...4).map { week -> RouteSummaryRecord in
+            let day = pacific.date(byAdding: .weekOfYear, value: -week, to: sunday)!
+            let start = pacific.date(bySettingHour: week == 0 ? 3 : 2, minute: 0, second: 0, of: day)!
+            let end = start.addingTimeInterval(1800)
+            let id = RecordedRoute(startedAt: start).persistentModelID
+            let stay = StayEvent(id: id, visitID: id, coordinate: .init(latitude: 0, longitude: 0), startedAt: start, endedAt: end)
+            let visit = RouteVisit(id: id, date: day, startedAt: start, endedAt: end, coordinate: stay.coordinate)
+            return RouteSummaryRecord(days: [DailySummary(date: day, inferredStay: stay)], visits: [visit], journeys: [])
+        }
+        let afterJump = WeeklyVisits(summary: RouteSummary(records: spring, calendar: pacific),
+                                     calendar: pacific, now: sunday.addingTimeInterval(5 * 3600))
+        precondition(afterJump.places.first?.current.visits.count == 1 && afterJump.places.first?.usualDays == nil)
+
         for (zone, firstWeekday, month, date) in [("UTC", 2, 11, 23), ("America/Santiago", 1, 9, 6)] {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: zone)!

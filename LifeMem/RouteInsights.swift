@@ -178,12 +178,17 @@ struct WeeklyVisits: Sendable {
             guard history.count == observed.count else { return false }
             return zip(observed, history).allSatisfy { a, b in
                 let longest = max(a.reduce(0) { $0 + $1.duration }, b.reduce(0) { $0 + $1.duration })
+                let wallTime: Set<Calendar.Component> = [.hour, .minute, .second]
                 let historical = b.compactMap { span -> DateInterval? in
                     guard let begin = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.start),
-                          let end = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.end), begin < end
+                          let end = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.end), begin < end,
+                          calendar.dateComponents(wallTime, from: begin) == calendar.dateComponents(wallTime, from: span.start),
+                          calendar.dateComponents(wallTime, from: end) == calendar.dateComponents(wallTime, from: span.end),
+                          abs(end.timeIntervalSince(begin) - span.duration) < 1
                     else { return nil }
                     return DateInterval(start: begin, end: end)
                 }
+                guard historical.count == b.count else { return false }
                 var overlap = 0.0, i = 0, j = 0
                 while i < a.count && j < historical.count {
                     let left = a[i], right = historical[j]
