@@ -10,7 +10,6 @@ struct AnalyticsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var names
     @Environment(PlaceResolver.self) private var resolver
-    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var now = Date.now
     @State private var period = Period.week
     @State private var start = Date.now
@@ -116,14 +115,10 @@ struct AnalyticsView: View {
 
     private var periodSelector: some View {
         VStack(spacing: 8) {
-            let picker = Picker("统计周期", selection: $period) {
+            Picker("统计周期", selection: $period) {
                 ForEach(Period.allCases) { item in Text(item.rawValue).tag(item) }
             }
-            if typeSize.isAccessibilitySize {
-                picker.pickerStyle(.menu)
-            } else {
-                picker.pickerStyle(.segmented)
-            }
+            .pickerStyle(.segmented)
             if period == .custom {
                 DatePicker("开始日期", selection: $start, displayedComponents: .date)
                     .accessibilityIdentifier("analytics-start-date")
