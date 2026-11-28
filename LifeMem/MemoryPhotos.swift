@@ -77,13 +77,13 @@ private struct ImportedImage: Transferable {
     }
 }
 
-private struct GalleryPhoto: Identifiable {
+struct GalleryPhoto: Identifiable {
     let id: String
     let saved: MemoryPhoto?
     let asset: PHAsset?
 
     init(saved: MemoryPhoto, asset: PHAsset? = nil) {
-        id = saved.id.uuidString
+        id = saved.assetID ?? saved.id.uuidString
         self.saved = saved
         self.asset = asset
     }
@@ -95,6 +95,20 @@ private struct GalleryPhoto: Identifiable {
     }
     var taken: Date? { saved?.taken ?? asset?.creationDate }
     var coordinate: CLLocationCoordinate2D? { saved?.coordinate ?? asset?.location?.coordinate }
+
+    @MainActor static func visible(attachments: [MemoryPhoto], key: RouteMemoryKey?, libraryContext: DayLibraryContext) -> [GalleryPhoto] {
+        let library = libraryContext.library
+        var result: [GalleryPhoto] = attachments.compactMap { item in
+            guard !item.hidden else { return nil }
+            if item.thumbnail != nil { return GalleryPhoto(saved: item) }
+            guard let id = item.assetID, let asset = library?.available[id] else { return nil }
+            return GalleryPhoto(saved: item, asset: asset)
+        }
+        if let key, let assets = library?.matches[key] {
+            result += assets.filter { !libraryContext.excluded.contains($0.localIdentifier) }.map { GalleryPhoto(asset: $0) }
+        }
+        return result.sorted { ($0.taken ?? $0.saved?.added ?? .distantPast) < ($1.taken ?? $1.saved?.added ?? .distantPast) }
+    }
 
     @ViewBuilder func image(full: Bool, fitPreview: Bool = false) -> some View {
         if let asset { LibraryImage(asset: asset, fullSize: full, fitPreview: fitPreview) }
@@ -124,16 +138,7 @@ struct EntryPhotosView: View {
     }
 
     private var photos: [GalleryPhoto] {
-        let library = libraryContext.library
-        var result: [GalleryPhoto] = attachments.compactMap { item in
-            if item.thumbnail != nil { return GalleryPhoto(saved: item) }
-            guard let id = item.assetID, let asset = library?.available[id] else { return nil }
-            return GalleryPhoto(saved: item, asset: asset)
-        }
-        if let key = entry.memoryKey, let assets = library?.matches[key] {
-            result += assets.filter { !libraryContext.excluded.contains($0.localIdentifier) }.map { GalleryPhoto(asset: $0) }
-        }
-        return result.sorted { ($0.taken ?? $0.saved?.added ?? .distantPast) < ($1.taken ?? $1.saved?.added ?? .distantPast) }
+        GalleryPhoto.visible(attachments: attachments, key: entry.memoryKey, libraryContext: libraryContext)
     }
 
     var body: some View {
@@ -239,7 +244,8 @@ private struct MemoryPhotoViewer: View {
     @State private var selection: String
     @State private var moving = false
     @State private var closeAfterMove = false
-    @State private var failed = false
+    @State private var failure: String?
+    @State private var voicePhoto: GalleryPhoto?
 
     init(entry: RouteReviewEntry, photos: [GalleryPhoto], first: GalleryPhoto, onMap: @escaping (PhotoMapRequest) -> Void) {
         self.entry = entry
@@ -262,6 +268,14 @@ private struct MemoryPhotoViewer: View {
                     let photo = photos[i]
                     Text("\(i + 1) / \(photos.count)").font(.caption.monospacedDigit())
                     if let taken = photo.taken { Text(taken.formatted()).font(.caption).foregroundStyle(.secondary) }
+                    if entry.memoryKey != nil {
+                        Button {
+                            voicePhoto = photo
+                        } label: {
+                            Label(photo.saved?.voiceDuration == nil ? "添加语音留言" : "查看语音留言", systemImage: "waveform")
+                                .frame(minHeight: 44)
+                        }
+                    }
                     Button(photo.coordinate == nil ? "在地图上看这段记录" : "在地图上看拍摄位置") {
                         onMap(.init(entryID: entry.id, coordinate: photo.coordinate))
                     }.frame(minHeight: 44)
@@ -297,7 +311,12 @@ private struct MemoryPhotoViewer: View {
                     .toolbar { Button("取消") { moving = false } }
                 }
             }
-            .alert("未能更新照片，请检查可用空间后重试", isPresented: $failed) { Button("好") {} }
+            .sheet(item: $voicePhoto) { photo in
+                if let key = entry.memoryKey { PhotoVoiceEditor(photo: photo, key: key) }
+            }
+            .alert("未能更新照片", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+                Button("好") {}
+            } message: { Text(failure ?? "") }
         }
     }
 
@@ -320,6 +339,8 @@ private struct MemoryPhotoViewer: View {
                 } else { photo.hide(in: writer) }
             }
             if moving { closeAfterMove = true; moving = false } else { dismiss() }
-        } catch { failed = true }
+        } catch MemoryPhoto.MoveError.bothHaveVoice {
+            failure = "两段记录中的这张照片各有一条留言。请先移除其中一条，再移动照片。"
+        } catch { failure = "请检查可用空间后重试。" }
     }
 }

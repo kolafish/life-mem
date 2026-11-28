@@ -168,6 +168,23 @@ struct RouteChecks {
         }
         let both = try copies()
         precondition(both.count == 2 && Set(both.compactMap { $0.memory?.key }) == [source.value, destination.value])
+        for key in [source, destination] {
+            try key.update(in: container) { memory, writer in
+                let photo = try memory.attachment(for: asset, in: writer)
+                photo.setVoice(audio: Data([1]), duration: 1, transcript: key.value)
+            }
+        }
+        do {
+            try destination.update(in: container) { target, writer in
+                try source.memory(in: writer).attachment(for: asset, in: writer).move(to: target, in: writer)
+            }
+            preconditionFailure("A move must preserve both existing voice memos")
+        } catch MemoryPhoto.MoveError.bothHaveVoice {}
+        let retained = try copies()
+        precondition(Set(retained.compactMap(\.voiceTranscript)) == [source.value, destination.value])
+        try source.update(in: container) { memory, writer in
+            try memory.attachment(for: asset, in: writer).setVoice(audio: nil, duration: nil, transcript: nil)
+        }
         let secondAsset = "only-at-source"
         let pixels = Data(repeating: 42, count: 256_000)
         try source.update(in: container) { memory, writer in
@@ -175,6 +192,7 @@ struct RouteChecks {
             original.image = pixels
             original.thumbnail = Data([4])
             original.taken = start
+            original.setVoice(audio: pixels, duration: 4, transcript: "Synthetic voice")
         }
         let cachedSource = try source.memory(in: context)
         precondition(cachedSource.photos?.count == 2)
@@ -193,6 +211,8 @@ struct RouteChecks {
         let transferred = try reopened.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == secondAsset }))
         precondition(transferred.count == 1 && transferred[0].memory?.key == destination.value)
         precondition(transferred[0].image == pixels && transferred[0].thumbnail == Data([4]) && transferred[0].taken == start)
+        precondition(transferred[0].voiceAudio == pixels && transferred[0].voiceDuration == 4)
+        precondition(transferred[0].voiceTranscript == "Synthetic voice")
         try destination.update(in: container) { memory, writer in
             try memory.attachment(for: secondAsset, in: writer).hide(in: writer)
             try memory.attachment(for: asset, in: writer).hide(in: writer)
@@ -204,6 +224,8 @@ struct RouteChecks {
             photo.hide(in: writer)
         }
         let after = try destination.memory(in: ModelContext(container))
+        let hidden = after.photos?.first { $0.assetID == secondAsset }
+        precondition(hidden?.hidden == true && hidden?.voiceDuration == nil && hidden?.voiceAudio == nil && hidden?.voiceTranscript == nil)
         precondition(!after.isAnnotated && after.owner?.visitRevision != prior)
     }
 
@@ -839,6 +861,11 @@ struct RouteChecks {
         precondition(departureDays.map(\.movingDuration) == [30, 10])
         let keys = departureDays.compactMap { $0.entries.first { $0.kind == .trip }?.memoryKey }
         precondition(keys.count == 2 && keys[0] == keys[1])
+        let journalDates = departureDays[0].journalAttachmentDays(in: departureDays)[keys[0]]!
+        precondition(journalDates == departureDays.map(\.date).sorted())
+        precondition(RouteReviewDay.journalDay(for: midnight, on: journalDates, calendar: calendar) == journalDates.last)
+        precondition(RouteReviewDay.journalDay(for: midnight.addingTimeInterval(-1), on: journalDates, calendar: calendar) == journalDates.first)
+        precondition(RouteReviewDay.journalDay(for: nil, on: journalDates, calendar: calendar) == journalDates.first)
         let memory = try keys[0].memory(in: context)
         memory.text = "Synthetic overnight trip"
         try context.save()

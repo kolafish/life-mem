@@ -193,6 +193,54 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(note.label.contains("River walk"))
     }
 
+    func testJournalShowsPhotoVoiceAndSavesEditedTranscript() {
+        let app = launch(fixture: "photo-day")
+        app.buttons["open-journal"].tap()
+        XCTAssertTrue(app.navigationBars["当日日记"].waitForExistence(timeout: 5))
+        let cover = XCTAttachment(screenshot: app.screenshot())
+        cover.name = "Journal cover"; cover.lifetime = .keepAlways; add(cover)
+        let play = app.buttons["memo-play"].firstMatch
+        scrollTo(play, in: app)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertFalse(app.staticTexts["未发布的草稿"].exists)
+        play.tap()
+        XCTAssertTrue(play.label.contains("停止播放"))
+        play.tap()
+        let photo = app.buttons["查看照片和语音留言"].firstMatch
+        photo.tap()
+        XCTAssertTrue(app.navigationBars["照片语音留言"].waitForExistence(timeout: 5))
+        let caption = app.textViews.firstMatch
+        XCTAssertTrue(caption.waitForExistence(timeout: 5))
+        caption.tap()
+        caption.typeText(" River")
+        app.buttons["保存"].tap()
+        let updated = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "River")).firstMatch
+        scrollTo(updated, in: app)
+        XCTAssertTrue(updated.exists)
+        let page = XCTAttachment(screenshot: app.screenshot())
+        page.name = "Journal photo and voice"; page.lifetime = .keepAlways; add(page)
+        app.buttons["完成"].tap()
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons.matching(identifier: "review-day").firstMatch.tap()
+        app.buttons["open-journal"].tap()
+        scrollTo(updated, in: app)
+        XCTAssertTrue(updated.exists)
+    }
+
+    func testEmptyJournalAndRouteWithoutPhotos() {
+        let app = launch(fixture: "empty")
+        app.buttons["open-journal"].tap()
+        XCTAssertTrue(app.staticTexts["今天的日记还是空白"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        app.terminate()
+        let route = launch(fixture: "day")
+        route.buttons["open-journal"].tap()
+        XCTAssertTrue(route.staticTexts["测试之家"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(route.buttons["memo-play"].exists)
+    }
+
     func testPhotoOpensItsLocationAndReturnsToEntry() {
         let app = launch(fixture: "photo-day")
         app.tabBars.buttons["回顾"].tap()

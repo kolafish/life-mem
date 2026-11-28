@@ -293,12 +293,18 @@ private enum ReviewTestFixture {
                     UIColor.systemTeal.setFill()
                     frame.fill(CGRect(x: 0, y: 0, width: 180, height: 120))
                 }
+                memory.text = "窗外的树影一路向后退。"
+                memory.draft = "未发布的草稿"
                 for offset in [0.0, 5.0] {
                     let photo = MemoryPhoto(memory: memory, assetID: nil)
                     photo.image = sample
                     photo.thumbnail = sample
                     photo.taken = entry.startedAt.addingTimeInterval(offset)
                     if offset == 0 {
+                        // Four seconds of synthetic, silent 8-bit PCM for playback UI checks.
+                        var wave = Data(base64Encoded: "UklGRiR9AABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQB9AAA=")!
+                        wave.append(Data(repeating: 128, count: 32_000))
+                        photo.setVoice(audio: wave, duration: 4, transcript: "转过街角的时候，风停了。")
                         photo.latitude = entry.segments.first?.firstCoordinate.latitude
                         photo.longitude = entry.segments.first?.firstCoordinate.longitude
                     }

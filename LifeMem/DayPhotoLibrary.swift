@@ -225,6 +225,7 @@ struct LibraryImage: View {
     let asset: PHAsset
     let fullSize: Bool
     var fitPreview = false
+    var previewPixels = 320
     @State private var image: UIImage?
     @State private var unavailable = false
     @State private var request: PHImageRequestID?
@@ -267,7 +268,7 @@ struct LibraryImage: View {
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = false
         options.deliveryMode = .opportunistic
-        let size = fullSize ? 2048 : 320
+        let size = fullSize ? 2048 : previewPixels
         request = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: size, height: size),
                                                          contentMode: fullSize || fitPreview ? .aspectFit : .aspectFill, options: options) { value, info in
             DispatchQueue.main.async {
@@ -277,5 +278,32 @@ struct LibraryImage: View {
                 else if fullSize && info?[PHImageResultIsInCloudKey] as? Bool == true { unavailable = true }
             }
         }
+    }
+}
+
+struct DayPhotoSource: ViewModifier {
+    let day: RouteReviewDay
+    var fullPhotoDay: RouteReviewDay? = nil
+    let library: DayPhotoLibrary
+    let enabled: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    @Query(filter: #Predicate<MemoryPhoto> { $0.assetID != nil }) private var photoDecisions: [MemoryPhoto]
+
+    func body(content: Content) -> some View {
+        let matchingDay = fullPhotoDay ?? day
+        let entryKeys = Set(day.entries.compactMap { $0.memoryKey?.value })
+        let assignedIDs = Set(photoDecisions.compactMap { item -> String? in
+            guard !item.hidden, let key = item.memory?.key, entryKeys.contains(key) else { return nil }
+            return item.assetID
+        })
+        content
+            .environment(\.dayLibrary, DayLibraryContext(library: library, excluded: Set(photoDecisions.compactMap(\.assetID))))
+            .task(id: DayLibraryRevision(date: matchingDay.date, entries: matchingDay.entries.map {
+                .init(key: $0.memoryKey, start: $0.startedAt, end: $0.endedAt, segments: $0.segments.count, observations: $0.observedVisits.map { DateInterval(start: $0.startedAt, end: $0.endedAt) })
+            }, enabled: enabled, visibleKeys: fullPhotoDay == nil ? nil : entryKeys, assignedIDs: assignedIDs, active: scenePhase == .active, revision: library.revision)) {
+                if scenePhase == .active { await library.refresh(matchingDay, detail: fullPhotoDay == nil ? nil : day, enabled: enabled, assignedIDs: assignedIDs) }
+                else { library.observe(false) }
+            }
+            .onDisappear { library.observe(false) }
     }
 }

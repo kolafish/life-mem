@@ -232,7 +232,16 @@ final class MemoryPhoto {
     var hidden: Bool
     @Attribute(.externalStorage) var image: Data?
     @Attribute(.externalStorage) var thumbnail: Data?
+    @Attribute(.externalStorage) var voiceAudio: Data?
+    var voiceDuration: Double?
+    var voiceTranscript: String?
     var memory: RouteMemory?
+
+    func setVoice(audio: Data?, duration: Double?, transcript: String?) {
+        voiceAudio = audio
+        voiceDuration = duration
+        voiceTranscript = transcript
+    }
 
     init(memory: RouteMemory, assetID: String?) {
         id = UUID()
@@ -246,14 +255,21 @@ final class MemoryPhoto {
         hidden = true
         image = nil
         thumbnail = nil
+        setVoice(audio: nil, duration: nil, transcript: nil)
         if assetID == nil { writer.delete(self) }
     }
+
+    enum MoveError: Error { case bothHaveVoice }
 
     func move(to destination: RouteMemory, in writer: ModelContext) throws {
         guard let origin = memory, origin.key != destination.key else { return }
         // On iOS 17 a loaded cascade can delete a reparented row with its former route.
         // Transfer the contents in one transaction so each route owns its own attachment.
         let replacement = try destination.attachment(for: assetID, in: writer)
+        if voiceDuration != nil {
+            guard replacement.voiceDuration == nil else { throw MoveError.bothHaveVoice }
+            replacement.setVoice(audio: voiceAudio, duration: voiceDuration, transcript: voiceTranscript)
+        }
         replacement.added = min(replacement.added, added)
         if image != nil || replacement.image == nil {
             replacement.image = image

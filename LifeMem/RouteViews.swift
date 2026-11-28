@@ -385,7 +385,6 @@ struct RouteDayReviewView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var photoLibrary = DayPhotoLibrary()
     @AppStorage("matchDayPhotos") private var matchDayPhotos = false
-    @Query(filter: #Predicate<MemoryPhoto> { $0.assetID != nil }) private var photoDecisions: [MemoryPhoto]
     @State private var photoRequest: PhotoMapRequest?
     @State private var expandedMap = false
     @State private var scrollAfterMap: RouteReviewEntry.ID?
@@ -415,12 +414,6 @@ struct RouteDayReviewView: View {
     var body: some View {
         let canLookUp = scenePhase == .active && allowsAutomaticLookup && placeResolver.isAutomaticEnabled && namingTarget == nil
         let selected = day.entries.first { $0.id == selection.id }
-        let matchingDay = fullPhotoDay ?? day
-        let entryKeys = Set(day.entries.compactMap { $0.memoryKey?.value })
-        let assignedIDs = Set(photoDecisions.compactMap { item -> String? in
-            guard !item.hidden, let key = item.memory?.key, entryKeys.contains(key) else { return nil }
-            return item.assetID
-        })
         let photoActions = DayPhotoActions(entries: day.entries, name: { entry in
             day.title(for: entry) { placeResolver.label(near: $0, names: placeNames) }
         }, showMap: { request in
@@ -533,16 +526,14 @@ struct RouteDayReviewView: View {
             }
         }
         .environment(\.dayPhotoActions, photoActions)
-        .environment(\.dayLibrary, DayLibraryContext(library: photoLibrary, excluded: Set(photoDecisions.compactMap(\.assetID))))
-        .task(id: DayLibraryRevision(date: matchingDay.date, entries: matchingDay.entries.map {
-            .init(key: $0.memoryKey, start: $0.startedAt, end: $0.endedAt, segments: $0.segments.count, observations: $0.observedVisits.map { DateInterval(start: $0.startedAt, end: $0.endedAt) })
-        }, enabled: matchDayPhotos, visibleKeys: fullPhotoDay == nil ? nil : entryKeys, assignedIDs: assignedIDs, active: scenePhase == .active, revision: photoLibrary.revision)) {
-            if scenePhase == .active { await photoLibrary.refresh(matchingDay, detail: fullPhotoDay == nil ? nil : day, enabled: matchDayPhotos, assignedIDs: assignedIDs) }
-            else { photoLibrary.observe(false) }
-        }
-        .onDisappear { photoLibrary.observe(false) }
+        .modifier(DayPhotoSource(day: day, fullPhotoDay: fullPhotoDay, library: photoLibrary, enabled: matchDayPhotos))
         .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
+        .toolbar {
+            if currentReview != nil {
+                ToolbarItem(placement: .topBarTrailing) { JournalLink(day: day) }
+            }
+        }
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: canLookUp) {
