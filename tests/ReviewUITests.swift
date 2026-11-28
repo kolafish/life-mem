@@ -40,6 +40,15 @@ final class ReviewUITests: XCTestCase {
         #endif
     }
 
+    func testTodayShowsStopsAndOpensSelectedEntry() {
+        let app = launch(fixture: "day")
+        let title = app.staticTexts["today-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        XCTAssertTrue(title.label.contains("测试办公室"))
+        app.buttons.matching(identifier: "today-entry").firstMatch.tap()
+        XCTAssertTrue(app.buttons["显示全天"].waitForExistence(timeout: 5))
+    }
+
     func testDailyMapAndTimelineSelection() {
         let app = launch(fixture: "mainland-day")
         app.tabBars.buttons["回顾"].tap()
@@ -171,7 +180,7 @@ final class ReviewUITests: XCTestCase {
         app.buttons["管理记录"].tap()
         XCTAssertTrue(app.staticTexts["未结束 · 还没有定位点"].waitForExistence(timeout: 5))
         app.buttons["完成"].tap()
-        app.tabBars.buttons["记录"].tap()
+        app.tabBars.buttons["今天"].tap()
 
         let discard = app.buttons["丢弃这次记录"]
         scrollTo(discard, in: app)
@@ -193,7 +202,7 @@ final class ReviewUITests: XCTestCase {
         app.buttons["删除路线"].tap()
         XCTAssertTrue(app.staticTexts["没有可管理的记录"].waitForExistence(timeout: 5))
         app.buttons["完成"].tap()
-        app.tabBars.buttons["记录"].tap()
+        app.tabBars.buttons["今天"].tap()
         XCTAssertTrue(app.buttons["开始记录"].waitForExistence(timeout: 5))
         app.terminate()
         app.launch()

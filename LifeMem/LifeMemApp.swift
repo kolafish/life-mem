@@ -101,6 +101,9 @@ private struct RootView: View {
     private var routes: [RecordedRoute]
     let recorder: RouteRecorder
     @State private var selection = Tab.record
+    @State private var today = Date.now
+    @State private var todayCache = RouteReviewCache()
+    @State private var todayReview: RouteReview?
     @State private var review: RouteReview?
     @State private var reviewCache = RouteReviewCache()
     @State private var summary: RouteSummary?
@@ -108,14 +111,17 @@ private struct RootView: View {
     let index: RouteSummaryIndex
 
     var body: some View {
-        let request = selection == .record ? nil : Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
+        let midnight = calendar.startOfDay(for: today)
+        let recent = Array(routes.prefix { $0.startedAt >= midnight })
+        let todayRoutes = recent + Array(routes.dropFirst(recent.count).prefix(1))
+        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: selection == .record ? todayRoutes : routes))
         let prefetchRoutes = recentFinishedRoutesForPrefetch
         let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
             NavigationStack {
-                RecordView(recorder: recorder)
+                RecordView(recorder: recorder, day: todayReview?.days.first { $0.date == midnight }, loading: todayReview == nil && !todayRoutes.isEmpty)
             }
-            .tabItem { Label("记录", systemImage: "location.circle") }
+            .tabItem { Label("今天", systemImage: "sun.max") }
             .tag(Tab.record)
 
             NavigationStack {
@@ -130,10 +136,16 @@ private struct RootView: View {
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
         }
-        .environment(\.currentRouteReview, review)
+        .environment(\.currentRouteReview, selection == .record ? todayReview : review)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in today = .now }
+        .onChange(of: scenePhase) { if scenePhase == .active { today = .now } }
         .tint(.indigo)
         .task(id: request) {
-            guard let request, !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return }
+            if request.tab == .record {
+                todayReview = todayCache.review(routes: todayRoutes, calendar: request.revision.calendar)
+                return
+            }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)
             }
