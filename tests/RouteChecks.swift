@@ -6,6 +6,7 @@ import SwiftData
 struct RouteChecks {
     @MainActor
     static func main() async throws {
+        checkWeeklyVisits()
         try checkVisitCandidates()
         try checkAutomaticTrips()
         checkMapProjection()
@@ -1191,6 +1192,47 @@ struct RouteChecks {
         precondition(estimate.observe(sample(150, 0.1), currentMode: .stationary) == nil)
         precondition(estimate.observe(sample(151, 1.2), currentMode: .stationary) == nil)
         precondition(estimate.observe(sample(152, 1.2), currentMode: .stationary) == .walking)
+    }
+
+    private static func checkWeeklyVisits() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar.firstWeekday = 2
+        let monday = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
+        let now = monday.addingTimeInterval(36 * 3600)
+        var records: [RouteSummaryRecord] = []
+        for week in 0...4 {
+            let start = calendar.date(byAdding: .weekOfYear, value: -week, to: monday)!
+            var days: [DailySummary] = []
+            var visits: [RouteVisit] = []
+            for n in 0...1 {
+                let day = calendar.date(byAdding: .day, value: n, to: start)!
+                let time = day.addingTimeInterval(3600)
+                let id = RecordedRoute(startedAt: time).persistentModelID
+                let stay = StayEvent(id: id, visitID: id, coordinate: .init(latitude: 0, longitude: 0),
+                                     startedAt: time, endedAt: time.addingTimeInterval(3600))
+                days.append(DailySummary(date: day, inferredStay: stay))
+                if n == 0 || week == 0 {
+                    for j in 0..<2 {
+                        let arrival = time.addingTimeInterval(Double(j * 60))
+                        visits.append(RouteVisit(id: RecordedRoute(startedAt: arrival).persistentModelID, date: day,
+                                                 startedAt: arrival, endedAt: stay.endedAt, coordinate: stay.coordinate))
+                    }
+                }
+            }
+            // A Tuesday evening visit falls beyond Tuesday noon's comparison window.
+            let late = start.addingTimeInterval(44 * 3600)
+            visits.append(RouteVisit(id: RecordedRoute(startedAt: late).persistentModelID,
+                                     date: calendar.startOfDay(for: late), startedAt: late, endedAt: late.addingTimeInterval(600),
+                                     coordinate: .init(latitude: 0, longitude: 0)))
+            records.append(RouteSummaryRecord(days: days, visits: visits, journeys: []))
+        }
+        func report(_ data: [RouteSummaryRecord]) -> WeeklyVisits.Place? {
+            WeeklyVisits(summary: RouteSummary(records: data, calendar: calendar), calendar: calendar, now: now).places.first
+        }
+        precondition(report(records)?.usualDays == 1 && report(records)?.current.visits.count == 2)
+        precondition(report([records[0]])?.usualDays == nil)
+        precondition(report(Array(records.dropLast()))?.history.isEmpty == true)
     }
 
     @MainActor

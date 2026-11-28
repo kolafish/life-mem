@@ -62,6 +62,9 @@ struct AnalyticsView: View {
                             description: Text("可以选择包含今天或过去日期的范围。")
                         )
                     } else {
+                        if period == .week, let weekly = report.weekly, !weekly.places.isEmpty {
+                            weeklyVisits(weekly)
+                        }
                         timeAllocation(data, range: range)
                         if !data.places.isEmpty { topPlaces(report) }
                         if let insights = report.insights {
@@ -127,6 +130,41 @@ struct AnalyticsView: View {
                     .onChange(of: start) { _, value in end = max(value, end) }
                 DatePicker("结束日期", selection: $end, in: calendar.startOfDay(for: start)..., displayedComponents: .date)
                     .accessibilityIdentifier("analytics-end-date")
+            }
+        }
+    }
+
+    private func weeklyVisits(_ weekly: WeeklyVisits) -> some View {
+        analyticsCard("本周到访") {
+            ForEach(weekly.places) { item in
+                DisclosureGroup {
+                    weekDates(item.current)
+                    ForEach(item.history) { week in weekDates(week) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        let name = item.place.visitName ?? resolver.label(near: item.place.coordinate, names: names) ?? "未命名地点"
+                        Text("\(name) · 本周 \(item.current.visits.count) 天")
+                        if let usual = item.usualDays {
+                            Text("过去四周同期通常 \(usual.formatted()) 天")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("weekly-place")
+            }
+        }
+    }
+
+    private func weekDates(_ week: WeeklyVisits.Week) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(week.start.formatted(.dateTime.month().day())) 起 · \(week.visits.count) 天").font(.caption)
+            ForEach(week.visits) { visit in
+                NavigationLink {
+                    RecordedVisitDestination(visit: visit)
+                } label: {
+                    Text(visit.startedAt.formatted(.dateTime.month().day().weekday(.wide)))
+                        .frame(minHeight: 40)
+                }
             }
         }
     }

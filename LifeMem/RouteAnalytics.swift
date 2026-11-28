@@ -48,6 +48,7 @@ struct RouteAnalysisReport: Sendable {
     let insights: RouteInsights?
     let placesByVisits: [RouteAnalytics.PlaceRank]
     let placesByDuration: [RouteAnalytics.PlaceRank]
+    let weekly: WeeklyVisits?
     let placeNumbers: [RouteVisit.ID: Int]
 }
 
@@ -108,6 +109,8 @@ actor RouteAnalysisWorker {
         let result = RouteAnalysisReport(
             scope: scope, analytics: data, behavior: behavior, insights: insights,
             placesByVisits: data.topPlaces(by: .visits), placesByDuration: data.topPlaces(by: .duration),
+            weekly: scope.calendar.dateInterval(of: .weekOfYear, for: request.now)?.start == scope.range.lowerBound
+                ? WeeklyVisits(summary: summary, calendar: scope.calendar, now: request.now) : nil,
             placeNumbers: Dictionary(uniqueKeysWithValues: data.places.enumerated().map { ($0.element.id, $0.offset + 1) })
         )
         previous = (request, result)
@@ -225,6 +228,10 @@ struct RouteAnalytics: Sendable {
         let time: Date
         let observation: Int
         let starts: Bool
+    }
+
+    static func observedDuration(_ day: DailySummary?, during interval: DateInterval) -> TimeInterval {
+        coverage(day, during: interval, category: { _ in nil }) { _, _ in }.values.reduce(0, +)
     }
 
     private static func coverage(_ summary: DailySummary?, during elapsed: DateInterval,
