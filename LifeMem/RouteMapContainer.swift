@@ -6,6 +6,8 @@ struct RouteMapContainer: View {
     let selected: RouteReviewEntry?
     let focusRequest: UUID
     var photo: CLLocationCoordinate2D? = nil
+    var groupCoordinate: CLLocationCoordinate2D? = nil
+    var openMap: ((CLLocationCoordinate2D?) -> Void)? = nil
     let selectEntry: (RouteReviewEntry.ID) -> Void
 
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -24,13 +26,28 @@ struct RouteMapContainer: View {
     }
 
     var body: some View {
-        MapReader { proxy in
-            Map(position: $position, interactionModes: [.pan, .zoom]) {
-                ForEach(visibleStayMarkers) { group in
-                    Annotation("停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
-                        stayMarker(group)
+        if let openMap {
+            routeMap
+                .accessibilityLabel("当天地图预览")
+                .accessibilityHint("轻点两下打开全屏地图")
+                .accessibilityAction { openMap(nil) }
+        } else {
+            routeMap
+        }
+    }
+
+    private var routeMap: some View {
+        let stops = visibleStayMarkers
+        return MapReader { proxy in
+            Map(position: $position, interactionModes: openMap == nil ? [.pan, .zoom] : []) {
+                ForEach(stops) { group in
+                    let name = group.stays.first?.visitName ?? placeResolver.label(near: group.coordinate, names: placeNames)
+                    let focused = selected == nil || group.stays.contains { $0.id == selected?.id }
+                    Annotation(name ?? "停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
+                        stayMarker(group, name: name)
+                            .opacity(openMap == nil && !focused ? 0.7 : 1)
                     }
-                    .annotationTitles(.hidden)
+                    .annotationTitles(openMap == nil && focused && name != nil ? .visible : .hidden)
                 }
                 ForEach(entries.filter { $0.stay == nil }) { entry in
                     ForEach(entry.segments) { segment in
@@ -53,6 +70,11 @@ struct RouteMapContainer: View {
                         tripMarkers(entry)
                     }
                 }
+                if openMap == nil, selected == nil, stops.isEmpty,
+                   let first = entries.first(where: { $0.kind == .trip }),
+                   let last = entries.last(where: { $0.kind == .trip }) {
+                    tripEndpoints(from: first, to: last)
+                }
                 if let photo {
                     Annotation("拍摄位置", coordinate: RouteMapProjection.standard.coordinate(for: photo), anchor: .bottom) {
                         VStack(spacing: 0) {
@@ -71,12 +93,14 @@ struct RouteMapContainer: View {
                     .annotationTitles(.hidden)
                 }
             }
-            .mapStyle(.standard(emphasis: .muted))
-            .accessibilityIdentifier("daily-route-map")
+            .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+            .accessibilityIdentifier(openMap == nil ? "daily-route-map" : "day-map-preview")
             .onChange(of: Viewport(selection: selected?.id, request: focusRequest), initial: true) {
                 if let photo {
                     position = .region(MKCoordinateRegion(center: RouteMapProjection.standard.coordinate(for: photo),
                                                           latitudinalMeters: 240, longitudinalMeters: 240))
+                } else if let groupCoordinate {
+                    position = stayCamera(at: groupCoordinate)
                 } else { position = selected.map(camera(for:)) ?? .automatic }
             }
             .onChange(of: selected?.endedAt) {
@@ -84,6 +108,7 @@ struct RouteMapContainer: View {
             }
             .simultaneousGesture(SpatialTapGesture().onEnded { tap in
                 if let id = trip(at: tap.location, proxy: proxy) { selectEntry(id) }
+                else { openMap?(nil) }
             })
         }
     }
@@ -135,15 +160,20 @@ struct RouteMapContainer: View {
         }
     }
 
-    private func stayMarker(_ group: StayMarkers) -> some View {
+    private func stayMarker(_ group: StayMarkers, name: String?) -> some View {
         let category = group.stays.first?.visitName == nil ? placeNames.category(for: group.coordinate) : nil
-        let name = group.stays.first?.visitName ?? placeResolver.label(near: group.coordinate, names: placeNames) ?? "停留地点"
         let isSelected = group.stays.contains { $0.id == selected?.id }
         let detail = group.stays.count == 1 ? routeDuration(group.stays[0].duration) : "\(group.stays.count) 次停留"
         return Group {
-            if group.stays.count == 1 {
-                Button { selectEntry(group.id) } label: { markerLabel(detail, category: category, selected: isSelected) }
-                    .buttonStyle(.plain)
+            if group.stays.count == 1 || openMap != nil {
+                Button {
+                    if group.stays.count == 1 { selectEntry(group.id) }
+                    else if let id = selected?.id, isSelected { selectEntry(id) }
+                    else { openMap?(group.coordinate) }
+                } label: {
+                    markerLabel(detail, category: category, selected: isSelected)
+                }
+                .buttonStyle(.plain)
             } else {
                 Menu {
                     ForEach(group.stays) { stay in
@@ -154,7 +184,7 @@ struct RouteMapContainer: View {
                 }
             }
         }
-        .accessibilityLabel("\(name)，\(detail)")
+        .accessibilityLabel("\(name ?? "停留地点")，\(detail)")
         .accessibilityIdentifier("stay-marker")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -172,11 +202,13 @@ struct RouteMapContainer: View {
             .contentShape(Rectangle())
     }
 
+    private func stayCamera(at coordinate: CLLocationCoordinate2D) -> MapCameraPosition {
+        let center = RouteMapProjection.standard.coordinate(for: coordinate)
+        return .region(MKCoordinateRegion(center: center, latitudinalMeters: 420, longitudinalMeters: 420))
+    }
+
     private func camera(for entry: RouteReviewEntry) -> MapCameraPosition {
-        if let coordinate = entry.visitCoordinate {
-            let center = RouteMapProjection.standard.coordinate(for: coordinate)
-            return .region(MKCoordinateRegion(center: center, latitudinalMeters: 420, longitudinalMeters: 420))
-        }
+        if let coordinate = entry.visitCoordinate { return stayCamera(at: coordinate) }
         let coordinates = entry.segments.flatMap(\.coordinates)
         guard let firstCoordinate = coordinates.first else { return .automatic }
         let first = RouteMapProjection.standard.coordinate(for: firstCoordinate)
@@ -201,11 +233,11 @@ struct RouteMapContainer: View {
     }
 
     @MapContentBuilder
-    private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
-        let segments = entry.segments.filter { $0.mode != .stationary }
-        if let start = segments.first?.firstCoordinate, let end = segments.last?.lastCoordinate {
-            let startName = entry.endpoints.flatMap { $0.startName ?? placeResolver.label(near: $0.start, names: placeNames) }
-            let endName = entry.endpoints.flatMap { $0.endName ?? placeResolver.label(near: $0.end, names: placeNames) }
+    private func tripEndpoints(from departure: RouteReviewEntry, to arrival: RouteReviewEntry) -> some MapContent {
+        if let start = departure.segments.first(where: { $0.mode != .stationary })?.firstCoordinate,
+           let end = arrival.segments.last(where: { $0.mode != .stationary })?.lastCoordinate {
+            let startName = departure.endpoints.flatMap { $0.startName ?? placeResolver.label(near: $0.start, names: placeNames) }
+            let endName = arrival.endpoints.flatMap { $0.endName ?? placeResolver.label(near: $0.end, names: placeNames) }
             let mapStart = RouteMapProjection.standard.coordinate(for: start)
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
                 Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: mapStart).tint(.indigo)
@@ -215,6 +247,12 @@ struct RouteMapContainer: View {
                 Marker(endName ?? "终点", systemImage: "flag.checkered", coordinate: mapEnd).tint(.indigo)
             }
         }
+    }
+
+    @MapContentBuilder
+    private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
+        tripEndpoints(from: entry, to: entry)
+        let segments = entry.segments.filter { $0.mode != .stationary }
         if let line = segments.max(by: { $0.coordinates.count < $1.coordinates.count })?.coordinates, line.count > 1 {
             let index = (line.count - 1) / 2
             let start = RouteMapProjection.standard.coordinate(for: line[index])
