@@ -90,7 +90,6 @@ struct RouteMapContainer: View {
                 }
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .accessibilityLabel("\(name)，\(detail)")
         .accessibilityIdentifier("stay-marker")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
