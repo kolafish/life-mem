@@ -51,6 +51,33 @@ final class RouteReviewCache {
         return result
     }
 
+    func today(routes: [RecordedRoute], since midnight: Date, calendar: Calendar) -> RouteReview {
+        let recent = routes.prefix { $0.startedAt >= midnight }
+        var included = Array(recent) + Array(routes.dropFirst(recent.count).prefix(1))
+        let known = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
+        var ids = Set(included.map(\.id))
+        selectCalendar(calendar)
+        func boundary(_ route: RecordedRoute) -> AutomaticVisitBoundary? {
+            let version = RouteReviewRevision.RouteVersion(id: route.id, pointCount: route.pointCount, visitRevision: route.visitRevision,
+                                                         endedAtRest: route.endedAtRest, isAutomatic: route.isAutomatic)
+            if let existing = contributions[version] { return existing.boundary }
+            let result = RouteReview.contribution(for: route, calendar: calendar)
+            contributions[version] = result
+            return result.boundary
+        }
+        var index = included.startIndex
+        while index < included.endIndex {
+            let next = included[index]
+            index += 1
+            guard let id = next.previousAutomaticRouteID, !ids.contains(id), let previous = known[id],
+                  next.arrivalDecision != "confirmed", previous.endedAtRest == true,
+                  let head = boundary(next), let tail = boundary(previous), head.continuesDrive(from: tail) else { continue }
+            ids.insert(id)
+            included.append(previous)
+        }
+        return review(routes: included, calendar: calendar)
+    }
+
     func summaries(
         for routes: [RecordedRoute],
         revision: RouteReviewRevision,
@@ -172,6 +199,7 @@ struct RouteReview {
 
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
         var contribution = Contribution()
+        let annotated = Set((route.memories ?? []).filter(\.isAnnotated).map(\.key))
         let points = route.points
         let edits = Dictionary(uniqueKeysWithValues: points.compactMap { point in
             point.visitName.map { (point.persistentModelID, $0) }
@@ -198,6 +226,7 @@ struct RouteReview {
                 if let visit = slice.visitCoordinate {
                     var observation = RouteVisit(id: first.id, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit)
                     observation.visitName = edits[first.id]
+                    observation.hasMemory = annotated.contains(RouteMemoryKey(owner: route.id, start: first.timestamp).value)
                     contribution.visits.append(observation)
                     let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
                     for (day, points) in pointsByDay {
@@ -327,6 +356,13 @@ struct AutomaticVisitBoundary: Codable, Sendable {
     var decision: String?
     var name: String?
 
+    func continuesDrive(from previous: Self) -> Bool {
+        self.previous == previous.routeID && session == previous.session && previous.endedAtRest &&
+            previous.endsDriving && startsDriving && !previous.endsWithVisit && !startsWithVisit &&
+            decision != "confirmed" && (0...ArrivalMotion.maximumResumption).contains(start.timeIntervalSince(previous.end)) &&
+            previous.destination.coordinate.location.distance(from: origin.coordinate.location) <= RouteReview.placeRadius
+    }
+
     static func candidates(in sources: [UUID: Self], continuing: [UUID: UUID], calendar: Calendar) -> [RouteVisit] {
         return sources.values.compactMap { departure in
             guard continuing[departure.routeID] == nil, departure.decision != "ignored", let previous = departure.previous, let arrival = sources[previous],
@@ -357,12 +393,7 @@ struct ResolvedVisitGaps {
         let byRoute = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.1) })
         let sources = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.0) })
         continuing = Dictionary(uniqueKeysWithValues: sources.values.compactMap { next -> (UUID, UUID)? in
-            guard let id = next.previous, let previous = sources[id], next.session == previous.session,
-                  previous.endedAtRest, previous.endsDriving, next.startsDriving,
-                  !previous.endsWithVisit, !next.startsWithVisit, next.decision != "confirmed",
-                  (0...ArrivalMotion.maximumResumption).contains(next.start.timeIntervalSince(previous.end)),
-                  previous.destination.coordinate.location.distance(from: next.origin.coordinate.location) <= RouteReview.placeRadius
-            else { return nil }
+            guard let id = next.previous, let previous = sources[id], next.continuesDrive(from: previous) else { return nil }
             return (next.routeID, id)
         })
         let candidates = AutomaticVisitBoundary.candidates(in: sources, continuing: continuing, calendar: calendar)
@@ -373,7 +404,7 @@ struct ResolvedVisitGaps {
             var start = candidate.startedAt
             var end = candidate.endedAt
             // Independently named observations retain their own edit owner.
-            for edge in [before, after].compactMap({ $0 }) where edge.visitName == nil {
+            for edge in [before, after].compactMap({ $0 }) where edge.visitName == nil && edge.hasMemory != true {
                 guard edge.coordinate.location.distance(from: candidate.coordinate.location) <= RouteReview.placeRadius,
                       edge.endedAt == candidate.startedAt || edge.startedAt == candidate.endedAt,
                       incorporated.insert(edge.id).inserted else { continue }

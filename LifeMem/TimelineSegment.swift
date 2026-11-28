@@ -180,6 +180,7 @@ struct RouteVisit: Identifiable, Codable, Sendable {
     var sourceArrivalID: UUID? = nil
     var sourceDepartureID: UUID?
     var isConfirmed = false
+    var hasMemory: Bool?
     let id: PersistentIdentifier
     let date: Date
     let startedAt: Date

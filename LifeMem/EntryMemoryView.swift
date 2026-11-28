@@ -91,18 +91,17 @@ private struct EntryNoteEditor: View {
 
     private func persist(_ value: String, operation: Write) {
         do {
-            let memory = try key.memory(in: context)
-            if operation != .publish {
-                memory.draft = value == memory.text ? nil : value
-            } else {
-                memory.text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                memory.draft = nil
+            try key.update(in: context.container) { memory, _ in
+                if operation != .publish {
+                    memory.draft = value == memory.text ? nil : value
+                } else {
+                    memory.text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    memory.draft = nil
+                }
             }
-            try context.save()
             storedDraft = value
             if operation != .draft { dismiss() }
         } catch {
-            context.rollback()
             failedWrite = operation
             saveError = true
         }

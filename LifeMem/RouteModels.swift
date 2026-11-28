@@ -127,6 +127,17 @@ struct RouteMemoryKey: Hashable {
         value = "\(arrival.uuidString)/arrival/\(departure.uuidString)"
     }
 
+    @MainActor func update(in container: ModelContainer, _ edit: (RouteMemory, ModelContext) throws -> Void) throws {
+        // An unsuccessful insert must never roll back the recorder's context.
+        let writer = ModelContext(container)
+        writer.autosaveEnabled = false
+        let memory = try memory(in: writer)
+        let wasAnnotated = memory.isAnnotated
+        try edit(memory, writer)
+        if wasAnnotated != memory.isAnnotated { memory.owner?.visitRevision = UUID() }
+        try writer.save()
+    }
+
     @MainActor func memory(in context: ModelContext) throws -> RouteMemory {
         let value = value
         if let existing = try context.fetch(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == value })).first {
@@ -152,6 +163,8 @@ final class RouteMemory {
     var draft: String?
     var owner: RecordedRoute?
     var previous: RecordedRoute?
+
+    var isAnnotated: Bool { !text.isEmpty || draft != nil }
 
     init(key: String, owner: RecordedRoute, previous: RecordedRoute?) {
         self.key = key

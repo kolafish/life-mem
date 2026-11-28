@@ -108,6 +108,23 @@ struct RouteChecks {
         try await checkMainlandPlaceLookup(in: root)
         await checkSharedPlaceCancellation(in: root)
         try await checkPlacePrefetch(in: root)
+        let protected = insertRoute(context: context, start: start, samples: [(0, 0, .walking, true), (30, 0.0003, .walking, false)])
+        try context.save()
+        let key = RouteReview(routes: [protected], calendar: .current).days[0].entries[0].memoryKey!
+        do {
+            try key.update(in: container) { memory, _ in
+                memory.draft = "unwritten"
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+            preconditionFailure("Expected the injected write failure")
+        } catch let failure as CocoaError { precondition(failure.code == .fileWriteOutOfSpace) }
+        try key.update(in: container) { memory, _ in memory.draft = "retried" }
+        context.insert(RecordedRoute(startedAt: start))
+        try context.save()
+        let fresh = ModelContext(container)
+        let retainedOwner = try fresh.fetch(FetchDescriptor<RecordedRoute>()).first { $0.id == protected.id }
+        let retainedNote = try key.memory(in: fresh)
+        precondition(retainedOwner?.points.count == 2 && retainedNote.draft == "retried")
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
@@ -1490,6 +1507,17 @@ struct RouteChecks {
         }
         precondition(joined.days.flatMap(\.stays).map(\.duration) == [1_920])
         precondition(joinedIndex.days.flatMap(\.stays).map(\.duration) == [1_920])
+        let observedEntry = RouteReview(routes: [arriving], calendar: calendar).days.flatMap(\.entries).first { $0.kind == .visit }!
+        try VisitCorrection.save(observedEntry.stay!, name: "Separate visit", in: context)
+        let observedKey = observedEntry.memoryKey!
+        try observedKey.update(in: container) { memory, _ in memory.text = "Window seat" }
+        try VisitCorrection.save(observedEntry.stay!, name: nil, in: context)
+        let reader = ModelContext(container)
+        let ids = [arriving.id, leaving.id]
+        let refreshed = try reader.fetch(FetchDescriptor<RecordedRoute>()).filter { ids.contains($0.id) }
+        let retained = RouteReview(routes: refreshed, calendar: calendar)
+        precondition(retained.days.flatMap(\.entries).contains { $0.memoryKey == observedKey })
+        precondition(retained.places.flatMap(\.visits).contains { $0.id == observedEntry.stay?.visitID })
         try VisitCorrection.save(joined.days[0].stays[0], name: nil, ignore: true, in: context)
         let ignored = RouteReview(routes: [leaving, arriving], calendar: calendar)
         precondition(ignored.days.flatMap(\.stays).map(\.duration) == [720])
@@ -1732,6 +1760,9 @@ struct RouteChecks {
         let joined = RouteReview(routes: [a, b], calendar: .current)
         let joinedKeys = joined.days.flatMap(\.entries).filter { $0.kind == .trip }.compactMap(\.memoryKey)
         precondition(joined.journeys.count == 1 && joinedKeys.count == 2 && Set(joinedKeys).count == 1)
+
+        let todayOnly = RouteReviewCache().today(routes: [b, a], since: Calendar.current.startOfDay(for: start), calendar: .current)
+        precondition(todayOnly.days.first?.entries.first?.memoryKey == joinedKeys.first)
 
         let changing = insertRoute(context: context, start: start, samples: [(0, 0, .unknown, true), (30, 0.0003, .unknown, false)])
         try context.save()
