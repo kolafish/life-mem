@@ -1195,19 +1195,25 @@ struct RouteChecks {
     }
 
     private static func checkWeeklyVisits() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        calendar.firstWeekday = 2
-        let monday = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23))!
+        for (zone, firstWeekday, month, date) in [("UTC", 2, 11, 23), ("America/Santiago", 1, 9, 6)] {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: zone)!
+            calendar.firstWeekday = firstWeekday
+            let monday = calendar.date(from: DateComponents(year: 2026, month: month, day: date))!
+            checkWeeklyPeriod(calendar: calendar, monday: monday)
+        }
+    }
+
+    private static func checkWeeklyPeriod(calendar: Calendar, monday: Date) {
         let now = monday.addingTimeInterval(36 * 3600)
         var records: [RouteSummaryRecord] = []
         for week in 0...4 {
-            let start = calendar.date(byAdding: .weekOfYear, value: -week, to: monday)!
+            let start = calendar.startOfDay(for: calendar.date(byAdding: .weekOfYear, value: -week, to: monday)!)
             var days: [DailySummary] = []
             var visits: [RouteVisit] = []
             for n in 0...1 {
-                let day = calendar.date(byAdding: .day, value: n, to: start)!
-                let time = day.addingTimeInterval(3600)
+                let day = calendar.startOfDay(for: calendar.date(byAdding: .day, value: n, to: start)!)
+                let time = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day)!
                 let id = RecordedRoute(startedAt: time).persistentModelID
                 let stay = StayEvent(id: id, visitID: id, coordinate: .init(latitude: 0, longitude: 0),
                                      startedAt: time, endedAt: time.addingTimeInterval(3600))
@@ -1233,6 +1239,16 @@ struct RouteChecks {
         precondition(report(records)?.usualDays == 1 && report(records)?.current.visits.count == 2)
         precondition(report([records[0]])?.usualDays == nil)
         precondition(report(Array(records.dropLast()))?.history.isEmpty == true)
+        let prior = records[1]
+        let evenings = prior.days.map { day in
+            let visit = day.stays[0]
+            let start = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: day.date)!
+            let stay = StayEvent(id: visit.id, visitID: visit.visitID, coordinate: visit.coordinate,
+                                 startedAt: start, endedAt: start.addingTimeInterval(3600))
+            return DailySummary(date: day.date, inferredStay: stay)
+        }
+        records[1] = RouteSummaryRecord(days: evenings, visits: prior.visits, journeys: [])
+        precondition(report(records)?.usualDays == nil)
     }
 
     @MainActor

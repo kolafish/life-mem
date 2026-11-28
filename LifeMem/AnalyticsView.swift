@@ -142,7 +142,7 @@ struct AnalyticsView: View {
                     ForEach(item.history) { week in weekDates(week) }
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        let name = item.place.visitName ?? resolver.label(near: item.place.coordinate, names: names) ?? "未命名地点"
+                        let name = item.place.visitName ?? resolver.label(near: item.place.coordinate, names: names) ?? "未命名地点 \(item.ordinal)"
                         Text("\(name) · 本周 \(item.current.visits.count) 天")
                         if let usual = item.usualDays {
                             Text("过去四周同期通常 \(usual.formatted()) 天")

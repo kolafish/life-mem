@@ -230,8 +230,17 @@ struct RouteAnalytics: Sendable {
         let starts: Bool
     }
 
-    static func observedDuration(_ day: DailySummary?, during interval: DateInterval) -> TimeInterval {
-        coverage(day, during: interval, category: { _ in nil }) { _, _ in }.values.reduce(0, +)
+    static func observedIntervals(_ day: DailySummary?, during interval: DateInterval) -> [DateInterval] {
+        guard let day else { return [] }
+        let intervals = day.movement + day.stays.map { DateInterval(start: $0.startedAt, end: $0.endedAt) }
+        let clipped = intervals.compactMap { clip($0, to: interval) }.sorted { $0.start < $1.start }
+        var merged: [DateInterval] = []
+        for span in clipped {
+            if let last = merged.last, span.start <= last.end {
+                merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, span.end))
+            } else { merged.append(span) }
+        }
+        return merged
     }
 
     private static func coverage(_ summary: DailySummary?, during elapsed: DateInterval,

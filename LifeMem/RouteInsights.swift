@@ -136,6 +136,7 @@ struct WeeklyVisits: Sendable {
 
     struct Place: Identifiable, Sendable {
         let place: RoutePlace
+        let ordinal: Int
         let current: Week
         let history: [Week]
         var id: RoutePlace.ID { place.id }
@@ -155,28 +156,41 @@ struct WeeklyVisits: Sendable {
             return
         }
         let windows = (0...4).compactMap { offset -> DateInterval? in
-            guard let start = calendar.date(byAdding: .weekOfYear, value: -offset, to: week.start),
-                  let end = calendar.date(byAdding: .weekOfYear, value: -offset, to: now), start < end else { return nil }
+            guard let end = calendar.date(byAdding: .weekOfYear, value: -offset, to: now),
+                  let start = calendar.dateInterval(of: .weekOfYear, for: end)?.start, start < end else { return nil }
             return DateInterval(start: start, end: end)
         }
         guard let current = windows.first else { places = []; return }
         let days = Dictionary(uniqueKeysWithValues: summary.days.map { ($0.date, $0) })
-        func dailyCoverage(_ window: DateInterval) -> [TimeInterval] {
-            var durations: [TimeInterval] = []
+        func dailyCoverage(_ window: DateInterval) -> [[DateInterval]] {
+            var result: [[DateInterval]] = []
             var day = window.start
             while day < window.end, let next = calendar.dateInterval(of: .day, for: day)?.end {
                 let interval = DateInterval(start: day, end: min(next, window.end))
-                durations.append(RouteAnalytics.observedDuration(days[day], during: interval))
+                result.append(RouteAnalytics.observedIntervals(days[day], during: interval))
                 day = next
             }
-            return durations
+            return result
         }
         let observed = dailyCoverage(current)
-        // Require comparable observation on the same weekdays, including today's partial day.
-        let comparable = windows.count == 5 && windows.dropFirst().allSatisfy { window in
+        let comparable = windows.count == 5 && windows.dropFirst().enumerated().allSatisfy { index, window in
             let history = dailyCoverage(window)
-            return history.count == observed.count && zip(observed, history).allSatisfy { a, b in
-                min(a, b) >= 15 * 60 && min(a, b) >= max(a, b) / 2
+            guard history.count == observed.count else { return false }
+            return zip(observed, history).allSatisfy { a, b in
+                let longest = max(a.reduce(0) { $0 + $1.duration }, b.reduce(0) { $0 + $1.duration })
+                let historical = b.compactMap { span -> DateInterval? in
+                    guard let begin = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.start),
+                          let end = calendar.date(byAdding: .weekOfYear, value: index + 1, to: span.end), begin < end
+                    else { return nil }
+                    return DateInterval(start: begin, end: end)
+                }
+                var overlap = 0.0, i = 0, j = 0
+                while i < a.count && j < historical.count {
+                    let left = a[i], right = historical[j]
+                    overlap += max(0, min(left.end, right.end).timeIntervalSince(max(left.start, right.start)))
+                    if left.end <= right.end { i += 1 } else { j += 1 }
+                }
+                return overlap >= 15 * 60 && overlap >= longest / 2
             }
         }
         func slice(_ place: RoutePlace, in interval: DateInterval) -> Week {
@@ -187,10 +201,10 @@ struct WeeklyVisits: Sendable {
             }
             return Week(start: interval.start, visits: visits)
         }
-        places = summary.places.compactMap { place -> Place? in
+        places = summary.places.enumerated().compactMap { index, place -> Place? in
             let recent = slice(place, in: current)
             let previous = comparable ? windows.dropFirst().map { slice(place, in: $0) } : []
-            let item = Place(place: place, current: recent, history: previous)
+            let item = Place(place: place, ordinal: index + 1, current: recent, history: previous)
             guard !recent.visits.isEmpty || (item.usualDays ?? 0) > 0 else { return nil }
             return item
         }.sorted {
