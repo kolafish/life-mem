@@ -3,13 +3,15 @@ import SwiftUI
 
 struct EntryMemoryView: View {
     let key: RouteMemoryKey
+    let entry: RouteReviewEntry
     let title: String
     let time: String
     let selected: Bool
     @Query private var memories: [RouteMemory]
     @State private var editing = false
 
-    init(key: RouteMemoryKey, title: String, time: String, selected: Bool) {
+    init(entry: RouteReviewEntry, key: RouteMemoryKey, title: String, time: String, selected: Bool) {
+        self.entry = entry
         self.key = key
         self.title = title
         self.time = time
@@ -20,12 +22,14 @@ struct EntryMemoryView: View {
 
     var body: some View {
         let note = memories.first?.text ?? ""
+        EntryPhotosView(entry: entry, key: key, selected: selected)
         if selected || !note.isEmpty || memories.first?.draft != nil {
             Button { editing = true } label: {
                 Label(note.isEmpty ? (memories.first?.draft == nil ? "留一句话" : "继续编辑草稿") : note,
                       systemImage: note.isEmpty ? "square.and.pencil" : "quote.opening")
                     .font(.subheadline)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(3)
                     .frame(minHeight: 44, alignment: .leading)
             }
             .accessibilityIdentifier("entry-note")

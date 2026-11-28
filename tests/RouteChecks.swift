@@ -126,6 +126,12 @@ struct RouteChecks {
         let retainedOwner = try fresh.fetch(FetchDescriptor<RecordedRoute>()).first { $0.id == protected.id }
         let retainedNote = try key.memory(in: fresh)
         precondition(retainedOwner?.points.count == 2 && retainedNote.draft == "retried")
+        _ = retainedNote.photos?.count
+        try key.update(in: container) { memory, writer in
+            let photo = MemoryPhoto(memory: memory, assetID: "cross-context-photo")
+            photo.image = Data(repeating: 7, count: 200_000)
+            writer.insert(photo)
+        }
         let originalPointIDs = Set(protected.points.map(\.persistentModelID))
         try protected.deleteWithMemories(in: context)
         try context.save()
@@ -133,8 +139,70 @@ struct RouteChecks {
         let keyValue = key.value
         let orphanCount = try afterRemoval.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == keyValue }))
         let pointsAfterRemoval = try afterRemoval.fetch(FetchDescriptor<RoutePoint>())
+        let orphanPhotos = try afterRemoval.fetchCount(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == "cross-context-photo" }))
+        precondition(orphanPhotos == 0)
         precondition(orphanCount == 0 && pointsAfterRemoval.allSatisfy { !originalPointIDs.contains($0.persistentModelID) })
+        try checkPhotoAttachments(context: context, start: start)
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
+    }
+
+    @MainActor
+    private static func checkPhotoAttachments(context: ModelContext, start: Date) throws {
+        let a = insertRoute(context: context, start: start, samples: [(0, 0, .walking, true), (20, 0.001, .walking, false)])
+        let b = insertRoute(context: context, start: start.addingTimeInterval(60), samples: [(0, 0, .walking, true), (20, 0.001, .walking, false)])
+        try context.save()
+        let source = RouteMemoryKey(owner: a.id, start: a.startedAt)
+        let destination = RouteMemoryKey(owner: b.id, start: b.startedAt)
+        let asset = "same-synthetic-asset"
+        let container = context.container
+        for key in [source, source, destination] {
+            try key.update(in: container) { memory, writer in
+                let photo = try memory.attachment(for: asset, in: writer)
+                photo.thumbnail = Data([2])
+            }
+        }
+        func copies() throws -> [MemoryPhoto] {
+            try ModelContext(container).fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == asset }))
+        }
+        let both = try copies()
+        precondition(both.count == 2 && Set(both.compactMap { $0.memory?.key }) == [source.value, destination.value])
+        let secondAsset = "only-at-source"
+        let pixels = Data(repeating: 42, count: 256_000)
+        try source.update(in: container) { memory, writer in
+            let original = try memory.attachment(for: secondAsset, in: writer)
+            original.image = pixels
+            original.thumbnail = Data([4])
+            original.taken = start
+        }
+        let cachedSource = try source.memory(in: context)
+        precondition(cachedSource.photos?.count == 2)
+        try destination.update(in: container) { target, writer in
+            let origin = try source.memory(in: writer)
+            let photo = try origin.attachment(for: asset, in: writer)
+            try photo.move(to: target, in: writer)
+            try origin.attachment(for: secondAsset, in: writer).move(to: target, in: writer)
+        }
+        try a.deleteWithMemories(in: context)
+        try context.save()
+        let moved = try copies()
+        precondition(moved.count == 1 && moved[0].memory?.key == destination.value)
+
+        let reopened = ModelContext(container)
+        let transferred = try reopened.fetch(FetchDescriptor<MemoryPhoto>(predicate: #Predicate { $0.assetID == secondAsset }))
+        precondition(transferred.count == 1 && transferred[0].memory?.key == destination.value)
+        precondition(transferred[0].image == pixels && transferred[0].thumbnail == Data([4]) && transferred[0].taken == start)
+        try destination.update(in: container) { memory, writer in
+            try memory.attachment(for: secondAsset, in: writer).hide(in: writer)
+            try memory.attachment(for: asset, in: writer).hide(in: writer)
+            _ = try memory.attachment(for: nil, in: writer)
+        }
+        let prior = try destination.memory(in: ModelContext(container)).owner?.visitRevision
+        try destination.update(in: container) { memory, writer in
+            let photo = memory.photos!.first { $0.assetID == nil }!
+            photo.hide(in: writer)
+        }
+        let after = try destination.memory(in: ModelContext(container))
+        precondition(!after.isAnnotated && after.owner?.visitRevision != prior)
     }
 
     private static func checkMapProjection() {
@@ -720,12 +788,22 @@ struct RouteChecks {
         let isolatedKey = RouteReview(routes: [isolatedRoute], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
         let other = try isolatedKey.memory(in: context)
         precondition(other.text.isEmpty)
+        let attachment = MemoryPhoto(memory: other, assetID: "synthetic-photo")
+        attachment.thumbnail = Data([1, 2, 3])
+        context.insert(attachment)
+        try context.save()
+        precondition(other.isAnnotated)
+        attachment.hidden = true
+        precondition(!other.isAnnotated)
+        attachment.hidden = false
         try context.save()
         context.delete(isolatedRoute)
         try context.save()
         let removedKey = isolatedKey.value
         let count = try context.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == removedKey }))
         precondition(count == 0)
+        let survivingPhotos = try context.fetchCount(FetchDescriptor<MemoryPhoto>())
+        precondition(survivingPhotos == 0)
         precondition(departureDays[0].moves[0].coordinates.first?.longitude == departureDays[1].moves[0].coordinates.last?.longitude)
         let arrivalDays = RouteReview(routes: [midnightArrival], calendar: calendar).days
         precondition(arrivalDays.map(\.movingDuration) == [10, 40])

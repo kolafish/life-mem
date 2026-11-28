@@ -161,6 +161,49 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(note.label.contains("River walk"))
     }
 
+    func testPhotoOpensItsLocationAndReturnsToEntry() {
+        let app = launch(fixture: "photo-day")
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons.matching(identifier: "review-day").firstMatch.tap()
+        let photo = app.buttons["查看照片"].firstMatch
+        XCTAssertTrue(revealTimelineControl(photo, in: app))
+        photo.tap()
+        let map = app.buttons["在地图上看拍摄位置"]
+        XCTAssertTrue(map.waitForExistence(timeout: 5))
+        map.tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 8))
+        let mapView = app.descendants(matching: .any).matching(identifier: "daily-route-map").firstMatch
+        XCTAssertGreaterThan(mapView.frame.height, app.frame.height * 0.32)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "photo-map-pin").firstMatch.waitForExistence(timeout: 4))
+        let screen = XCTAttachment(screenshot: app.screenshot())
+        screen.name = "Photo location and timeline card"
+        screen.lifetime = .keepAlways
+        add(screen)
+        app.buttons.matching(identifier: "timeline-entry").firstMatch.tap()
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "photo-map-pin").firstMatch.exists)
+        app.buttons["返回时间线"].tap()
+        let selected = app.buttons.matching(identifier: "timeline-entry").matching(NSPredicate(format: "isSelected == true")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+    }
+
+    func testHidingPhotoLeavesOtherPhotoAndItsRoute() {
+        let app = launch(fixture: "photo-day")
+        app.buttons.matching(identifier: "today-entry").firstMatch.tap()
+        let photos = app.buttons.matching(identifier: "查看照片")
+        XCTAssertTrue(revealTimelineControl(photos.firstMatch, in: app))
+        photos.firstMatch.tap()
+        app.buttons["照片选项"].tap()
+        app.buttons["从记录中隐藏"].tap()
+        let remaining = NSPredicate { _, _ in photos.count == 1 }
+        expectation(for: remaining, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        photos.firstMatch.tap()
+        let map = app.buttons["在地图上看这段记录"]
+        XCTAssertTrue(map.waitForExistence(timeout: 5))
+        map.tap()
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+    }
+
     func testEmptyHistory() {
         let app = launch(fixture: "empty")
         app.tabBars.buttons["回顾"].tap()
