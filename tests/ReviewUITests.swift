@@ -144,6 +144,35 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(home.isSelected)
     }
 
+    #if targetEnvironment(simulator)
+    func testDictationFallbackPreservesTypedNote() {
+        XCUIApplication().resetAuthorizationStatus(for: .microphone)
+        let app = launch(fixture: "day")
+        app.buttons.matching(identifier: "today-entry").firstMatch.tap()
+        let note = app.buttons.matching(identifier: "entry-note").firstMatch
+        XCTAssertTrue(revealTimelineControl(note, in: app))
+        note.tap()
+        let input = app.textViews["这次记录的一句话"]
+        input.tap()
+        input.typeText("River")
+        XCTAssertEqual(input.value as? String, "River")
+        app.buttons["note-dictation"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.alerts.firstMatch.waitForExistence(timeout: 4) {
+            let deny = springboard.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label == %@", "Don", "不允许")).firstMatch
+            XCTAssertTrue(deny.exists)
+            deny.tap()
+        }
+        let save = app.buttons["保存"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: save)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(input.waitForExistence(timeout: 4))
+        XCTAssertEqual(input.value as? String, "River")
+        app.buttons["保存"].tap()
+        XCTAssertTrue(note.label.contains("River"))
+    }
+    #endif
+
     func testNoteDraftAndSave() {
         let app = launch(fixture: "day")
         app.buttons.matching(identifier: "today-entry").firstMatch.tap()

@@ -489,6 +489,7 @@ struct RouteDayReviewView: View {
                 .padding(.bottom, 16)
             }
             .modifier(DayPhotoPicker())
+            .modifier(EntryNotePresentation())
             .fullScreenCover(isPresented: $expandedMap, onDismiss: {
                 if let id = scrollAfterMap {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
@@ -525,6 +526,7 @@ struct RouteDayReviewView: View {
                     }
                 }
                 .modifier(DayPhotoPicker())
+                .modifier(EntryNotePresentation())
             }
             .task {
                 if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }
