@@ -681,6 +681,25 @@ struct RouteChecks {
         let overnightReview = RouteReview(routes: repeatedOvernight + [midnightDeparture, midnightArrival], calendar: calendar)
         let departureDays = RouteReview(routes: [midnightDeparture], calendar: calendar).days
         precondition(departureDays.map(\.movingDuration) == [30, 10])
+        let keys = departureDays.compactMap { $0.entries.first { $0.kind == .trip }?.memoryKey }
+        precondition(keys.count == 2 && keys[0] == keys[1])
+        let memory = try keys[0].memory(in: context)
+        memory.text = "Synthetic overnight trip"
+        try context.save()
+        let rebuiltKey = RouteReview(routes: [midnightDeparture], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
+        let reopened = try rebuiltKey.memory(in: context)
+        precondition(reopened.persistentModelID == memory.persistentModelID)
+        let isolatedRoute = insertRoute(context: context, start: midnight, samples: [(0, 0, .walking, true), (20, 0.0002, .walking, false)])
+        try context.save()
+        let isolatedKey = RouteReview(routes: [isolatedRoute], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
+        let other = try isolatedKey.memory(in: context)
+        precondition(other.text.isEmpty)
+        try context.save()
+        context.delete(isolatedRoute)
+        try context.save()
+        let removedKey = isolatedKey.value
+        let count = try context.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == removedKey }))
+        precondition(count == 0)
         precondition(departureDays[0].moves[0].coordinates.first?.longitude == departureDays[1].moves[0].coordinates.last?.longitude)
         let arrivalDays = RouteReview(routes: [midnightArrival], calendar: calendar).days
         precondition(arrivalDays.map(\.movingDuration) == [10, 40])

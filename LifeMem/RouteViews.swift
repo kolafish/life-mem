@@ -481,7 +481,7 @@ struct RouteDayReviewView: View {
                     }
                     .safeAreaInset(edge: .bottom) {
                         if let selected {
-                            TimelineSegmentRow(entry: selected, selected: false) {
+                            TimelineSegmentRow(entry: selected, selected: false, showMemoryActions: true) {
                                 selection.focus(selected.id)
                             } nameTarget: { _ in }
                             .padding(8)

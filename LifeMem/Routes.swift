@@ -137,7 +137,10 @@ struct RouteReview {
         }
         for visit in inferred {
             for (day, stay) in visit.dailyInferredStays(calendar: calendar) {
-                entriesByDay[day, default: []].append((nil, .init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
+                let key = visit.sourceDepartureID.flatMap { departure in
+                    visit.sourceArrivalID.map { RouteMemoryKey(arrival: $0, departure: departure) }
+                }
+                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -145,7 +148,7 @@ struct RouteReview {
                 date: date,
                 entries: resolved.joinDriveLegs(entriesByDay[date, default: []], start: \.startedAt) { first, next in
                     guard let from = first.endpoints, let to = next.endpoints else { return nil }
-                    return .init(kind: .trip, followsGap: first.followsGap, segments: first.segments + next.segments,
+                    return .init(memoryKey: first.memoryKey, kind: .trip, followsGap: first.followsGap, segments: first.segments + next.segments,
                                  endpoints: from.continuing(to: to), stay: nil)
                 }
             )
@@ -197,6 +200,7 @@ struct RouteReview {
                                              startedAt: max(day, first.timestamp), endedAt: min(dayEnd, last.timestamp))
                         stay.visitName = observation.visitName
                         contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
+                            memoryKey: .init(owner: route.id, start: first.timestamp, visit: true),
                             kind: .visit, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                             segments: segments, endpoints: nil, stay: stay
                         ))
@@ -228,6 +232,7 @@ struct RouteReview {
                     endpoints?.startName = day == departureDay ? startName : nil
                     endpoints?.endName = day == arrivalDay ? endName : nil
                     contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
+                        memoryKey: hasMovement ? .init(owner: route.id, start: first.timestamp, visit: false) : nil,
                         kind: hasMovement ? .trip : .fragment, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                         segments: segments, endpoints: endpoints, stay: nil
                     ))

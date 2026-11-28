@@ -21,6 +21,11 @@ final class RecordedRoute {
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.route)
     var points: [RoutePoint]
 
+    @Relationship(deleteRule: .cascade, inverse: \RouteMemory.owner)
+    var memories: [RouteMemory]?
+    @Relationship(deleteRule: .cascade, inverse: \RouteMemory.previous)
+    var arrivalMemories: [RouteMemory]?
+
     init(startedAt: Date) {
         id = UUID()
         self.startedAt = startedAt
@@ -102,5 +107,56 @@ enum VisitCorrection {
         }
         route.visitRevision = UUID()
         do { try context.save() } catch { context.rollback(); throw error }
+    }
+}
+
+/// Identifies the original observation, even when midnight splits its presentation.
+struct RouteMemoryKey: Hashable {
+    let owner: UUID
+    let value: String
+    var previous: UUID?
+
+    init(owner: UUID, start: Date, visit: Bool) {
+        self.owner = owner
+        value = "\(owner.uuidString)/\(visit ? "stay" : "move")/\(start.timeIntervalSinceReferenceDate.bitPattern)"
+    }
+
+    init(arrival: UUID, departure: UUID) {
+        owner = departure
+        previous = arrival
+        value = "\(arrival.uuidString)/arrival/\(departure.uuidString)"
+    }
+
+    @MainActor func memory(in context: ModelContext) throws -> RouteMemory {
+        let value = value
+        if let existing = try context.fetch(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == value })).first {
+            return existing
+        }
+        func route(_ id: UUID) throws -> RecordedRoute {
+            guard let result = try context.fetch(FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == id })).first
+            else { throw VisitCorrection.Failure.sourceUnavailable }
+            return result
+        }
+        let owner = try route(self.owner)
+        let previous = try previous.map(route)
+        let memory = RouteMemory(key: value, owner: owner, previous: previous)
+        context.insert(memory)
+        return memory
+    }
+}
+
+@Model
+final class RouteMemory {
+    @Attribute(.unique) var key: String
+    var text: String
+    var draft: String?
+    var owner: RecordedRoute?
+    var previous: RecordedRoute?
+
+    init(key: String, owner: RecordedRoute, previous: RecordedRoute?) {
+        self.key = key
+        self.owner = owner
+        self.previous = previous
+        text = ""
     }
 }

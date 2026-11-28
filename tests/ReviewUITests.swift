@@ -144,6 +144,23 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(home.isSelected)
     }
 
+    func testNoteDraftAndSave() {
+        let app = launch(fixture: "day")
+        app.buttons.matching(identifier: "today-entry").firstMatch.tap()
+        let note = app.buttons.matching(identifier: "entry-note").firstMatch
+        XCTAssertTrue(revealTimelineControl(note, in: app))
+        note.tap()
+        let input = app.textViews["这次记录的一句话"]
+        input.tap()
+        input.typeText("River walk")
+        app.buttons["关闭"].tap()
+        XCTAssertTrue(note.label.contains("草稿"))
+        note.tap()
+        XCTAssertEqual(input.value as? String, "River walk")
+        app.buttons["保存"].tap()
+        XCTAssertTrue(note.label.contains("River walk"))
+    }
+
     func testEmptyHistory() {
         let app = launch(fixture: "empty")
         app.tabBars.buttons["回顾"].tap()
