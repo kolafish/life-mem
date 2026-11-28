@@ -20,6 +20,8 @@
 		AA0000000000000000000081 /* ReviewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* ReviewUITests.swift */; };
 		AA0000000000000000000400 /* DailySummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000300 /* DailySummaryCard.swift */; };
 		AA0000000000000000000401 /* RouteMapContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000301 /* RouteMapContainer.swift */; };
+		AA0000000000000000000456 /* DailyJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000356 /* DailyJournal.swift */; };
+		AA0000000000000000000457 /* PhotoVoiceMemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000357 /* PhotoVoiceMemo.swift */; };
 		AA0000000000000000000454 /* NoteDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000354 /* NoteDictation.swift */; };
 		AA0000000000000000000455 /* NoteTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000355 /* NoteTranscript.swift */; };
 		AA0000000000000000000453 /* DayPhotoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000353 /* DayPhotoLibrary.swift */; };
@@ -71,6 +73,8 @@
 		AA0000000000000000000082 /* LifeMemUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LifeMemUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000300 /* DailySummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummaryCard.swift; sourceTree = "<group>"; };
 		AA0000000000000000000301 /* RouteMapContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteMapContainer.swift; sourceTree = "<group>"; };
+		AA0000000000000000000356 /* DailyJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyJournal.swift; sourceTree = "<group>"; };
+		AA0000000000000000000357 /* PhotoVoiceMemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoVoiceMemo.swift; sourceTree = "<group>"; };
 		AA0000000000000000000354 /* NoteDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteDictation.swift; sourceTree = "<group>"; };
 		AA0000000000000000000355 /* NoteTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteTranscript.swift; sourceTree = "<group>"; };
 		AA0000000000000000000353 /* DayPhotoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPhotoLibrary.swift; sourceTree = "<group>"; };
@@ -143,6 +147,8 @@
 				AA0000000000000000000303 /* DayPickerHeader.swift */,
 				AA0000000000000000000302 /* TimelineSegmentRow.swift */,
 				AA0000000000000000000301 /* RouteMapContainer.swift */,
+				AA0000000000000000000356 /* DailyJournal.swift */,
+				AA0000000000000000000357 /* PhotoVoiceMemo.swift */,
 				AA0000000000000000000354 /* NoteDictation.swift */,
 				AA0000000000000000000355 /* NoteTranscript.swift */,
 				AA0000000000000000000353 /* DayPhotoLibrary.swift */,
@@ -253,6 +259,8 @@
 				AA0000000000000000000403 /* DayPickerHeader.swift in Sources */,
 				AA0000000000000000000402 /* TimelineSegmentRow.swift in Sources */,
 				AA0000000000000000000401 /* RouteMapContainer.swift in Sources */,
+				AA0000000000000000000456 /* DailyJournal.swift in Sources */,
+				AA0000000000000000000457 /* PhotoVoiceMemo.swift in Sources */,
 				AA0000000000000000000454 /* NoteDictation.swift in Sources */,
 				AA0000000000000000000455 /* NoteTranscript.swift in Sources */,
 				AA0000000000000000000453 /* DayPhotoLibrary.swift in Sources */,
@@ -314,7 +322,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
@@ -333,7 +341,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";

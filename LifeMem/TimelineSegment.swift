@@ -135,6 +135,24 @@ struct RouteReviewDay: Identifiable {
         return result.isEmpty ? nil : result.joined(separator: " → ")
     }
 
+    // An observation can span several day pages. Keep each photo and its voice on one page.
+    func journalAttachmentDays(in days: [Self]) -> [RouteMemoryKey: [Date]] {
+        let keys = Set(entries.compactMap(\.memoryKey))
+        var result: [RouteMemoryKey: [Date]] = [:]
+        for day in days {
+            for key in Set(day.entries.compactMap(\.memoryKey)) where keys.contains(key) {
+                result[key, default: []].append(day.date)
+            }
+        }
+        return result.mapValues { $0.sorted() }
+    }
+
+    static func journalDay(for taken: Date?, on dates: [Date], calendar: Calendar) -> Date? {
+        guard let taken else { return dates.first }
+        let day = calendar.startOfDay(for: taken)
+        return dates.last(where: { $0 <= day }) ?? dates.first
+    }
+
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
     var stays: [StayEvent] { entries.compactMap(\.stay).filter { $0.isCandidate != true } }
     var moves: [MoveEvent] { entries.flatMap(\.moves) }

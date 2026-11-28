@@ -274,6 +274,70 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(note.label.contains("River walk"))
     }
 
+    func testJournalShowsPhotoVoiceAndSavesEditedTranscript() {
+        let app = launch(fixture: "photo-day")
+        app.buttons["open-journal"].tap()
+        XCTAssertTrue(app.navigationBars["当日日记"].waitForExistence(timeout: 5))
+        let cover = XCTAttachment(screenshot: app.screenshot())
+        cover.name = "Journal cover"; cover.lifetime = .keepAlways; add(cover)
+        let play = app.buttons["memo-play"].firstMatch
+        scrollTo(play, in: app)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertFalse(app.staticTexts["未发布的草稿"].exists)
+        play.tap()
+        XCTAssertTrue(play.label.contains("停止播放"))
+        play.tap()
+        let photo = app.buttons["查看照片和语音留言"].firstMatch
+        photo.tap()
+        XCTAssertTrue(app.navigationBars["照片语音留言"].waitForExistence(timeout: 5))
+        let caption = app.textViews.firstMatch
+        XCTAssertTrue(caption.waitForExistence(timeout: 5))
+        caption.tap()
+        caption.typeText(" River")
+        app.buttons["保存"].tap()
+        let updated = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "River")).firstMatch
+        scrollTo(updated, in: app)
+        XCTAssertTrue(updated.exists)
+        let page = XCTAttachment(screenshot: app.screenshot())
+        page.name = "Journal photo and voice"; page.lifetime = .keepAlways; add(page)
+        app.buttons["完成"].tap()
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons.matching(identifier: "review-day").firstMatch.tap()
+        app.buttons["open-journal"].tap()
+        scrollTo(updated, in: app)
+        XCTAssertTrue(updated.exists)
+    }
+
+    func testJournalKeepsVoicesWhenSharedAssetIsUnavailable() {
+        let app = launch(fixture: "voice-day")
+        app.buttons["open-journal"].tap()
+        let controls = app.buttons.matching(identifier: "memo-play")
+        let first = controls.element(boundBy: 0)
+        let second = controls.element(boundBy: 1)
+        scrollTo(second, in: app)
+        XCTAssertTrue(first.isHittable && second.isHittable)
+        first.tap()
+        XCTAssertTrue(first.label.contains("停止播放"))
+        XCTAssertTrue(second.label.contains("播放原声"))
+        second.tap()
+        XCTAssertTrue(second.label.contains("停止播放"))
+        XCTAssertTrue(first.label.contains("播放原声"))
+    }
+
+    func testEmptyJournalAndRouteWithoutPhotos() {
+        let app = launch(fixture: "empty")
+        app.buttons["open-journal"].tap()
+        XCTAssertTrue(app.staticTexts["今天的日记还是空白"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        app.terminate()
+        let route = launch(fixture: "day")
+        route.buttons["open-journal"].tap()
+        XCTAssertTrue(route.staticTexts["测试之家"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(route.buttons["memo-play"].exists)
+    }
+
     func testPhotoOpensItsLocationAndReturnsToEntry() {
         let app = launch(fixture: "photo-day")
         app.tabBars.buttons["回顾"].tap()
@@ -307,6 +371,13 @@ final class ReviewUITests: XCTestCase {
         photos.firstMatch.tap()
         app.buttons["照片选项"].tap()
         app.buttons["从记录中隐藏"].tap()
+        let confirmation = app.alerts["隐藏照片并移除留言？"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["查看语音留言"].exists)
+        app.buttons["照片选项"].tap()
+        app.buttons["从记录中隐藏"].tap()
+        confirmation.buttons["隐藏并移除留言"].tap()
         let remaining = NSPredicate { _, _ in photos.count == 1 }
         expectation(for: remaining, evaluatedWith: app)
         waitForExpectations(timeout: 8)
@@ -504,11 +575,10 @@ final class ReviewUITests: XCTestCase {
         day.tap()
         let stay = app.buttons.matching(identifier: "timeline-entry")
             .matching(NSPredicate(format: "label CONTAINS %@", "停留地点")).firstMatch
-        scrollTo(stay, in: app, horizontalOffset: 0.98)
-        XCTAssertTrue(stay.isHittable)
+        XCTAssertTrue(revealTimelineControl(stay, in: app))
         stay.tap()
         let edit = app.buttons["编辑地名"]
-        scrollTo(edit, in: app, horizontalOffset: 0.98)
+        XCTAssertTrue(revealTimelineControl(edit, in: app))
         edit.tap()
 
         let rebuild = app.buttons["重建地名文件"]

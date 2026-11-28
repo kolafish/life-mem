@@ -156,6 +156,9 @@ struct RecordView: View {
             .padding(20)
         }
         .navigationTitle("今天")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { JournalLink(day: day).disabled(loading) }
+        }
         .sheet(item: $focusedEntry) { entry in
             NavigationStack {
                 RouteDayReviewView(day: entry.day, focus: entry.id)

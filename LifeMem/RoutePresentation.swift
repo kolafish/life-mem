@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 struct ReviewTextRow: View {
@@ -68,4 +69,22 @@ func routeDistance(_ meters: Double) -> String {
 
 extension RecordedRoute {
     var formattedDistance: String { routeDistance(distanceMeters) }
+}
+
+extension RouteReviewDay {
+    func journalSummary(named: (CLLocationCoordinate2D) -> String?) -> String {
+        guard let first = entries.first, let end = entries.map(\.endedAt).max() else { return "" }
+        let stops = stays.compactMap { $0.visitName ?? named($0.coordinate) }
+        var detail: String
+        if let firstStop = stops.first, let lastStop = stops.last, let other = stops.first(where: { $0 != firstStop }) {
+            detail = firstStop == lastStop
+                ? "在\(firstStop)停留，途经\(other)，又回到\(lastStop)。"
+                : "从\(firstStop)到\(lastStop)，留下了 \(stays.count) 次停留。"
+        } else if let stop = stops.first { detail = "在\(stop)留下了足迹。" }
+        else if !stays.isEmpty { detail = "记录了 \(stays.count) 次停留。" }
+        else { detail = "留下一段轨迹。" }
+        let distance = movingDistanceMeters
+        let span = clockRange(first.startedAt, end)
+        return detail + (distance > 0 ? "\(span)，共移动\(routeDistance(distance))。" : "记录时间为\(span)。")
+    }
 }
