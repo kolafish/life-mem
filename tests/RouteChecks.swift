@@ -233,6 +233,8 @@ struct RouteChecks {
         try context.save()
         let allDay = RouteReviewCache().review(routes: [route, later], calendar: .current).days[0]
         precondition(allDay.memoryKey(forPhotoAt: time.addingTimeInterval(3600), coordinate: near)?.owner == later.id)
+        precondition(allDay.placement(forPhotoAt: time.addingTimeInterval(3600), coordinate: near, in: day) == .outsideDetail)
+        precondition(ambiguous.placement(forPhotoAt: time, coordinate: near, in: day) == .pending)
     }
 
     private static func checkMapProjection() {
@@ -1629,7 +1631,9 @@ struct RouteChecks {
         precondition(joined.days[0].memoryKey(forPhotoAt: captured, coordinate: mergedStay.stay?.coordinate) == mergedStay.memoryKey)
         let gap = arriving.startedAt.addingTimeInterval(1200)
         precondition(joined.days[0].memoryKey(forPhotoAt: gap, coordinate: nil) == nil)
-        let observedEntry = RouteReview(routes: [arriving], calendar: calendar).days.flatMap(\.entries).first { $0.kind == .visit }!
+        let rawDay = RouteReview(routes: [arriving], calendar: calendar).days[0]
+        let observedEntry = rawDay.entries.first { $0.kind == .visit }!
+        precondition(joined.days[0].placement(forPhotoAt: captured, coordinate: nil, in: rawDay) == .record(observedEntry.memoryKey!))
         try VisitCorrection.save(observedEntry.stay!, name: "Separate visit", in: context)
         let observedKey = observedEntry.memoryKey!
         try observedKey.update(in: container) { memory, _ in memory.text = "Window seat" }

@@ -13,6 +13,7 @@ struct DayLibraryRevision: Equatable {
     let date: Date
     let entries: [Entry]
     let enabled: Bool
+    let visibleKeys: Set<String>?
     let assignedIDs: Set<String>
     let active: Bool
     let revision: Int
@@ -45,7 +46,7 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    func refresh(_ day: RouteReviewDay, enabled: Bool, assignedIDs: Set<String>) async {
+    func refresh(_ day: RouteReviewDay, detail: RouteReviewDay?, enabled: Bool, assignedIDs: Set<String>) async {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status != authorization {
             cachedDay = nil
@@ -76,9 +77,12 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
         var grouped: [RouteMemoryKey: [PHAsset]] = [:]
         var others: [PHAsset] = []
         for asset in assets {
-            if let time = asset.creationDate, let key = day.memoryKey(forPhotoAt: time, coordinate: asset.location?.coordinate) {
-                grouped[key, default: []].append(asset)
-            } else { others.append(asset) }
+            guard let time = asset.creationDate else { continue }
+            switch day.placement(forPhotoAt: time, coordinate: asset.location?.coordinate, in: detail) {
+            case .record(let key): grouped[key, default: []].append(asset)
+            case .pending: others.append(asset)
+            case .outsideDetail: break
+            }
         }
         var visible = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
         let missing = assignedIDs.subtracting(visible.keys)

@@ -534,8 +534,8 @@ struct RouteDayReviewView: View {
         .environment(\.dayLibrary, DayLibraryContext(library: photoLibrary, excluded: Set(photoDecisions.compactMap(\.assetID))))
         .task(id: DayLibraryRevision(date: matchingDay.date, entries: matchingDay.entries.map {
             .init(key: $0.memoryKey, start: $0.startedAt, end: $0.endedAt, segments: $0.segments.count, observations: $0.observedVisits.map { DateInterval(start: $0.startedAt, end: $0.endedAt) })
-        }, enabled: matchDayPhotos, assignedIDs: assignedIDs, active: scenePhase == .active, revision: photoLibrary.revision)) {
-            if scenePhase == .active { await photoLibrary.refresh(matchingDay, enabled: matchDayPhotos, assignedIDs: assignedIDs) }
+        }, enabled: matchDayPhotos, visibleKeys: fullPhotoDay == nil ? nil : entryKeys, assignedIDs: assignedIDs, active: scenePhase == .active, revision: photoLibrary.revision)) {
+            if scenePhase == .active { await photoLibrary.refresh(matchingDay, detail: fullPhotoDay == nil ? nil : day, enabled: matchDayPhotos, assignedIDs: assignedIDs) }
             else { photoLibrary.observe(false) }
         }
         .onDisappear { photoLibrary.observe(false) }
@@ -580,7 +580,7 @@ struct RouteDetailView: View {
     var body: some View {
         let days = cache.detail(for: route, among: routes, calendar: calendar).days
         if let day = days.first(where: { $0.date == selectedDate }) ?? days.first {
-            let fullDay = matchDayPhotos ? photoCache.review(routes: routes, calendar: calendar).days.first { $0.date == day.date } : nil
+            let fullDay = matchDayPhotos ? photoCache.day(routes: routes, containing: day.date, calendar: calendar).days.first { $0.date == day.date } : nil
             RouteDayReviewView(day: day, fullPhotoDay: fullDay)
                 .environment(\.currentRouteReview, nil)
                 .id(day.id)
