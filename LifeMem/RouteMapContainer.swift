@@ -58,6 +58,9 @@ struct RouteMapContainer: View {
             .onChange(of: Viewport(selection: selected?.id, request: focusRequest), initial: true) {
                 position = selected.map(camera(for:)) ?? .automatic
             }
+            .onChange(of: selected?.endedAt) {
+                if let selected, !position.positionedByUser { position = camera(for: selected) }
+            }
             .simultaneousGesture(SpatialTapGesture().onEnded { tap in
                 if let id = trip(at: tap.location, proxy: proxy) { selectEntry(id) }
             })

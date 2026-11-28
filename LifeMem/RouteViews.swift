@@ -398,7 +398,7 @@ struct RouteDayReviewView: View {
         var id: RouteReviewEntry.ID?
         private(set) var request = UUID()
 
-        mutating func focus(_ id: RouteReviewEntry.ID) {
+        mutating func focus(_ id: RouteReviewEntry.ID?) {
             self.id = id
             request = UUID()
         }
@@ -438,13 +438,16 @@ struct RouteDayReviewView: View {
                             HStack {
                                 Text("时间线").font(.headline).accessibilityAddTraits(.isHeader)
                                 Spacer(minLength: 8)
-                                Button { expandedMap = true } label: {
+                                Button {
+                                    scrollAfterMap = selection.id
+                                    expandedMap = true
+                                } label: {
                                     Label("展开地图", systemImage: "arrow.up.left.and.arrow.down.right")
                                 }
                                 .font(.subheadline)
                                 .frame(minHeight: 44)
                                 if selected != nil {
-                                    Button("显示全天") { selection.id = nil }
+                                    Button("显示全天") { selection.focus(nil) }
                                         .font(.subheadline)
                                         .frame(minHeight: 44)
                                 }
@@ -492,8 +495,7 @@ struct RouteDayReviewView: View {
                             Button("返回时间线") { expandedMap = false }
                         }
                         ToolbarItem(placement: .primaryAction) {
-                            Button("显示全天") { selection.id = nil; scrollAfterMap = nil }
-                                .disabled(selected == nil)
+                            Button("显示全天") { selection.focus(nil); scrollAfterMap = nil }
                         }
                     }
                 }
