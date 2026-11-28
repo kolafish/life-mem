@@ -27,12 +27,10 @@ struct RouteMapContainer: View {
 
     var body: some View {
         if let openMap {
-            routeMap.accessibilityRepresentation {
-                Button { openMap(nil) } label: {
-                    Text("打开当天全屏地图").frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .accessibilityIdentifier("day-map-preview")
-            }
+            routeMap
+                .accessibilityLabel("当天地图预览")
+                .accessibilityHint("轻点两下打开全屏地图")
+                .accessibilityAction { openMap(nil) }
         } else {
             routeMap
         }
@@ -96,7 +94,7 @@ struct RouteMapContainer: View {
                 }
             }
             .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
-            .accessibilityIdentifier("daily-route-map")
+            .accessibilityIdentifier(openMap == nil ? "daily-route-map" : "day-map-preview")
             .onChange(of: Viewport(selection: selected?.id, request: focusRequest), initial: true) {
                 if let photo {
                     position = .region(MKCoordinateRegion(center: RouteMapProjection.standard.coordinate(for: photo),
