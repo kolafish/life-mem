@@ -62,7 +62,8 @@ struct RouteSummary: Sendable {
         let byDate = Dictionary(grouping: records.flatMap(\.days) + extra, by: \.date)
         days = byDate.keys.sorted(by: >).map { DailySummary(date: $0, combining: byDate[$0, default: []]) }
         places = RoutePlace.group(records.flatMap(\.visits) + confirmed, within: RouteReview.placeRadius)
-        journeys = records.flatMap(\.journeys)
+        let edges = ConfirmedVisitEdges(visits: confirmed)
+        journeys = records.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
     }
 }
 

@@ -1232,6 +1232,10 @@ struct RouteChecks {
         let records = RouteReviewCache().summaries(for: [a, b], revision: revision, indexed: [:])
         let indexed = RouteSummary(records: Array(records.values), calendar: calendar)
         precondition(indexed.places.count == 1 && indexed.days.flatMap(\.stays).count == 2)
+        for journeys in [confirmed.journeys, indexed.journeys] {
+            precondition(journeys.contains { $0.endpoints.endName == "测试书店" })
+            precondition(journeys.contains { $0.endpoints.startName == "测试书店" })
+        }
         try VisitCorrection.save(projected[0], name: nil, ignore: true, in: context)
         precondition(candidates().isEmpty && RouteReview(routes: [b, a], calendar: calendar).places.isEmpty)
         b.arrivalDecision = nil

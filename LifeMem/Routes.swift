@@ -116,12 +116,20 @@ struct RouteReview {
 
     fileprivate init(contributions: [Contribution], calendar: Calendar) {
         var entriesByDay: [Date: [RouteReviewEntry]] = [:]
+        let inferred = AutomaticVisitBoundary.candidates(in: contributions.compactMap(\.boundary), calendar: calendar)
+        let edges = ConfirmedVisitEdges(visits: inferred)
         for contribution in contributions {
             for (date, entries) in contribution.entriesByDay {
-                entriesByDay[date, default: []].append(contentsOf: entries)
+                entriesByDay[date, default: []] += entries.map { entry in
+                    var entry = entry
+                    if let ends = entry.endpoints {
+                        entry.endpoints = edges.names(for: contribution.boundary, endpoints: ends,
+                                                      start: entry.startedAt, end: entry.endedAt)
+                    }
+                    return entry
+                }
             }
         }
-        let inferred = AutomaticVisitBoundary.candidates(in: contributions.compactMap(\.boundary), calendar: calendar)
         for visit in inferred {
             for (day, stay) in visit.dailyInferredStays(calendar: calendar) {
                 entriesByDay[day, default: []].append(.init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay))
@@ -134,7 +142,7 @@ struct RouteReview {
             )
         }
         places = RoutePlace.group(contributions.flatMap(\.visits) + inferred.filter(\.isConfirmed), within: Self.placeRadius)
-        journeys = contributions.flatMap(\.journeys)
+        journeys = contributions.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
     }
 
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
@@ -284,6 +292,7 @@ struct AutomaticVisitBoundary: Codable, Sendable {
             visit.isConfirmed = departure.decision == "confirmed"
             visit.visitName = departure.name
             visit.sourceArrivalID = previous
+            visit.sourceDepartureID = departure.routeID
             return visit
         }
     }
@@ -304,5 +313,48 @@ extension RouteVisit {
             day = end
         }
         return result
+    }
+}
+
+struct ConfirmedVisitEdges {
+    private let starts: [UUID: RouteVisit]
+    private let ends: [UUID: RouteVisit]
+
+    init(visits: [RouteVisit]) {
+        let confirmed = visits.filter(\.isConfirmed)
+        starts = Dictionary(confirmed.compactMap { v in v.sourceDepartureID.map { ($0, v) } }, uniquingKeysWith: { first, _ in first })
+        ends = Dictionary(confirmed.compactMap { v in v.sourceArrivalID.map { ($0, v) } }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func matches(_ time: Date, _ position: CLLocationCoordinate2D, _ edge: Date, _ visit: RouteVisit) -> Bool {
+        abs(time.timeIntervalSince(edge)) <= LocationSampling.maximumGap &&
+            position.location.distance(from: visit.coordinate.location) <= RouteReview.placeRadius
+    }
+
+    func names(for boundary: AutomaticVisitBoundary?, endpoints: RouteReviewEntry.Endpoints,
+               start: Date, end: Date) -> RouteReviewEntry.Endpoints {
+        guard let boundary else { return endpoints }
+        var updated = endpoints
+        if let visit = starts[boundary.routeID], matches(start, endpoints.start, boundary.start, visit) {
+            updated.startName = visit.visitName
+        }
+        if let visit = ends[boundary.routeID], matches(end, endpoints.end, boundary.end, visit) {
+            updated.endName = visit.visitName
+        }
+        return updated
+    }
+
+    func applying(to journey: RouteJourney, boundary: AutomaticVisitBoundary?) -> RouteJourney {
+        guard let boundary else { return journey }
+        var updated = journey
+        let end = journey.departedAt.addingTimeInterval(journey.duration)
+        updated.endpoints = names(for: boundary, endpoints: journey.endpoints, start: journey.departedAt, end: end)
+        if let visit = starts[boundary.routeID], matches(journey.departedAt, journey.endpoints.start, boundary.start, visit) {
+            updated.departureStay = .init(coordinate: visit.coordinate, time: visit.endedAt)
+        }
+        if let visit = ends[boundary.routeID], matches(end, journey.endpoints.end, boundary.end, visit) {
+            updated.arrivalStay = .init(coordinate: visit.coordinate, time: visit.startedAt)
+        }
+        return updated
     }
 }

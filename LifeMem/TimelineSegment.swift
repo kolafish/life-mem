@@ -29,7 +29,7 @@ struct RouteReviewEntry: Identifiable {
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
-    let endpoints: Endpoints?
+    var endpoints: Endpoints?
     let stay: StayEvent?
 
     var visitCoordinate: CLLocationCoordinate2D? { stay?.coordinate }
@@ -127,13 +127,14 @@ struct RouteJourney: Identifiable, Codable, Sendable {
     let departedAt: Date
     let duration: TimeInterval
     let mode: TravelMode
-    let departureStay: StayConnection?
-    let arrivalStay: StayConnection?
+    var departureStay: StayConnection?
+    var arrivalStay: StayConnection?
 }
 
 struct RouteVisit: Identifiable, Codable, Sendable {
     var visitName: String? = nil
     var sourceArrivalID: UUID? = nil
+    var sourceDepartureID: UUID?
     var isConfirmed = false
     let id: PersistentIdentifier
     let date: Date
