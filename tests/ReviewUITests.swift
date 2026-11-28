@@ -116,7 +116,9 @@ final class ReviewUITests: XCTestCase {
         marker.tap()
         let reset = app.buttons["显示全天"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["编辑地名"].isHittable)
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+        app.buttons["返回时间线"].tap()
+        XCTAssertTrue(app.buttons["编辑地名"].waitForExistence(timeout: 5))
         let screen = XCTAttachment(screenshot: app.screenshot())
         screen.name = "Focused stay on iPhone SE"
         screen.lifetime = .keepAlways
@@ -124,11 +126,22 @@ final class ReviewUITests: XCTestCase {
         reset.tap()
         XCTAssertFalse(reset.exists)
 
+        app.buttons["展开地图"].tap()
+        let map = app.descendants(matching: .any).matching(identifier: "daily-route-map").firstMatch
+        map.swipeLeft()
+        XCTAssertTrue(reset.isEnabled)
+        reset.tap()
+        app.buttons["返回时间线"].tap()
+
         let home = app.buttons.matching(identifier: "timeline-entry")
             .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "测试之家", "→")).firstMatch
         XCTAssertTrue(revealTimelineControl(home, in: app), app.debugDescription)
         home.tap()
         XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["展开地图"].tap()
+        app.buttons["返回时间线"].tap()
+        XCTAssertTrue(home.isHittable)
+        XCTAssertTrue(home.isSelected)
     }
 
     func testEmptyHistory() {
