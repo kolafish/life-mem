@@ -144,6 +144,38 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(home.isSelected)
     }
 
+    #if targetEnvironment(simulator)
+    func testDictationFallbackPreservesTypedNote() {
+        XCUIApplication().resetAuthorizationStatus(for: .microphone)
+        let app = launch(fixture: "day")
+        app.buttons.matching(identifier: "today-entry").firstMatch.tap()
+        let note = app.buttons.matching(identifier: "entry-note").firstMatch
+        XCTAssertTrue(revealTimelineControl(note, in: app))
+        note.tap()
+        let input = app.textViews["这次记录的一句话"]
+        input.tap()
+        input.typeText("River")
+        XCTAssertEqual(input.value as? String, "River")
+        app.buttons["note-dictation"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.alerts.firstMatch.waitForExistence(timeout: 4) {
+            let deny = springboard.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label == %@", "Don", "不允许")).firstMatch
+            XCTAssertTrue(deny.exists)
+            deny.tap()
+        }
+        let message = app.staticTexts["note-dictation-message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 6))
+        XCTAssertTrue(message.label.contains("离线") || message.label.contains("未获授权") || message.label.contains("无法使用麦克风"), message.label)
+        XCTAssertTrue(input.waitForExistence(timeout: 4))
+        XCTAssertEqual(input.value as? String, "River")
+        input.tap()
+        input.typeText(" walk")
+        XCTAssertEqual(input.value as? String, "River walk")
+        app.buttons["保存"].tap()
+        XCTAssertTrue(note.label.contains("River walk"))
+    }
+    #endif
+
     func testNoteDraftAndSave() {
         let app = launch(fixture: "day")
         app.buttons.matching(identifier: "today-entry").firstMatch.tap()
