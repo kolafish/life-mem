@@ -9,6 +9,7 @@
 		AA0000000000000000000011 /* LifeMemApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000001 /* LifeMemApp.swift */; };
 		AA0000000000000000000012 /* Routes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000002 /* Routes.swift */; };
 		AA0000000000000000000013 /* RouteRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* RouteRecorder.swift */; };
+		AA0000000000000000000B13 /* AutomaticTrips.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000B03 /* AutomaticTrips.swift */; };
 		AA0000000000000000000014 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* RecordView.swift */; };
 		AA0000000000000000000015 /* RouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* RouteViews.swift */; };
 		AA0000000000000000000018 /* PlaceNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* PlaceNamingView.swift */; };
@@ -50,6 +51,7 @@
 		AA0000000000000000000001 /* LifeMemApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeMemApp.swift; sourceTree = "<group>"; };
 		AA0000000000000000000002 /* Routes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Routes.swift; sourceTree = "<group>"; };
 		AA0000000000000000000003 /* RouteRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteRecorder.swift; sourceTree = "<group>"; };
+		AA0000000000000000000B03 /* AutomaticTrips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticTrips.swift; sourceTree = "<group>"; };
 		AA0000000000000000000004 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000005 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
 		AA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -96,6 +98,7 @@
 				AA0000000000000000000001 /* LifeMemApp.swift */,
 				AA0000000000000000000002 /* Routes.swift */,
 				AA0000000000000000000003 /* RouteRecorder.swift */,
+				AA0000000000000000000B03 /* AutomaticTrips.swift */,
 				AA0000000000000000000004 /* RecordView.swift */,
 				AA0000000000000000000005 /* RouteViews.swift */,
 				AA0000000000000000000341 /* RouteInsightCards.swift */,
@@ -198,6 +201,7 @@
 				AA0000000000000000000011 /* LifeMemApp.swift in Sources */,
 				AA0000000000000000000012 /* Routes.swift in Sources */,
 				AA0000000000000000000013 /* RouteRecorder.swift in Sources */,
+				AA0000000000000000000B13 /* AutomaticTrips.swift in Sources */,
 				AA0000000000000000000014 /* RecordView.swift in Sources */,
 				AA0000000000000000000015 /* RouteViews.swift in Sources */,
 				AA0000000000000000000441 /* RouteInsightCards.swift in Sources */,
@@ -269,7 +273,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 27;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
@@ -288,7 +292,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 27;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";

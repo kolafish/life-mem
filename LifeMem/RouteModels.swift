@@ -6,6 +6,8 @@ import SwiftData
 final class RecordedRoute {
     var id: UUID
     var startedAt: Date
+    var isAutomatic: Bool?
+    var automaticPauseAt: Date?
     var isFinished: Bool
     var pointCount: Int
     var distanceMeters: Double

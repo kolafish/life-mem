@@ -20,6 +20,14 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private(set) var locationUnavailable = false
     var notice: String?
 
+    let automaticTrips: AutomaticTrips
+    private let preferences: UserDefaults
+    private(set) var automaticEnabled: Bool
+    private(set) var automaticNeedsSettings = false
+    private var automaticTask: Task<Void, Never>?
+    private var backgroundSession: CLBackgroundActivitySession?
+    private var requestedAlways = false
+
     private let context: ModelContext
     private let summaryIndex: RouteSummaryIndex
     private let locationManager = CLLocationManager()
@@ -30,7 +38,10 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     private var speedEstimate = SpeedModeEstimate()
     private var recordingID = UUID()
 
-    init(context: ModelContext, summaryIndex: RouteSummaryIndex) {
+    init(context: ModelContext, summaryIndex: RouteSummaryIndex, preferences: UserDefaults) {
+        self.preferences = preferences
+        automaticEnabled = preferences.bool(forKey: "automaticRecordingEnabled")
+        automaticTrips = AutomaticTrips(context: context)
         self.context = context
         self.summaryIndex = summaryIndex
         super.init()
@@ -38,10 +49,103 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         locationManager.showsBackgroundLocationIndicator = true
         locationManager.pausesLocationUpdatesAutomatically = false
         recoverUnfinishedRoute()
+        if automaticEnabled && state == .idle {
+            if locationManager.authorizationStatus == .authorizedAlways {
+                startAutomaticStream()
+            } else {
+                automaticNeedsSettings = true
+            }
+        }
+    }
+
+    func setAutomatic(_ enabled: Bool) {
+        guard enabled != automaticEnabled, !isDeletingRoute else { return }
+        if enabled {
+            guard state == .idle else { return }
+            automaticEnabled = true
+            preferences.set(Date.now, forKey: "automaticRecordingSince")
+            preferences.set(true, forKey: "automaticRecordingEnabled")
+            switch locationManager.authorizationStatus {
+            case .notDetermined: locationManager.requestWhenInUseAuthorization()
+            case .authorizedWhenInUse: requestAutomaticAuthorization()
+            case .authorizedAlways: startAutomaticStream()
+            default: automaticNeedsSettings = true
+            }
+        } else {
+            stopAutomatic()
+        }
+    }
+
+    private func requestAutomaticAuthorization() {
+        automaticNeedsSettings = true
+        guard !requestedAlways else { return }
+        requestedAlways = true
+        locationManager.requestAlwaysAuthorization()
+    }
+
+    private func startAutomaticStream() {
+        guard automaticTask == nil, state == .idle, automaticEnabled else { return }
+        automaticNeedsSettings = false
+        needsPreciseLocation = locationManager.accuracyAuthorization == .reducedAccuracy
+        locationUnavailable = false
+        do { try automaticTrips.restore(now: .now) }
+        catch {
+            automaticFailure()
+            return
+        }
+        // On a background relaunch the first fix may predate this process.
+        let enabledAt = preferences.object(forKey: "automaticRecordingSince") as? Date ?? .now
+        backgroundSession = CLBackgroundActivitySession()
+        automaticTask = Task {
+            do {
+                for try await update in CLLocationUpdate.liveUpdates() {
+                    guard !Task.isCancelled else { return }
+                    guard !isDeletingRoute else { continue }
+                    if let fix = update.location, fix.timestamp < enabledAt { continue }
+                    let stationary: Bool
+                    if #available(iOS 18, *) { stationary = update.stationary }
+                    else { stationary = update.isStationary }
+                    locationUnavailable = update.location == nil && !stationary
+                    try automaticTrips.receive(update.location, stationary: stationary, receivedAt: .now)
+                }
+                guard !Task.isCancelled else { return }
+                stopAutomatic()
+                notice = "自动定位已结束，请重新开启自动记录。"
+            } catch {
+                guard !Task.isCancelled else { return }
+                automaticFailure()
+            }
+        }
+    }
+
+    private func cancelAutomaticStream() {
+        automaticTask?.cancel()
+        automaticTask = nil
+        backgroundSession?.invalidate()
+        backgroundSession = nil
+        automaticEnabled = false
+        automaticNeedsSettings = false
+        requestedAlways = false
+        preferences.set(false, forKey: "automaticRecordingEnabled")
+    }
+
+    private func automaticFailure() {
+        cancelAutomaticStream()
+        automaticTrips.forget()
+        recoverUnfinishedRoute()
+        notice = "自动记录已中断，之前保存的轨迹仍可回看。请检查定位权限和剩余空间后重试。"
+    }
+
+    private func stopAutomatic() {
+        cancelAutomaticStream()
+        do {
+            try automaticTrips.end()
+            recoverUnfinishedRoute()
+        } catch { automaticFailure() }
     }
 
     func start() {
-        guard !isDeletingRoute, state == .idle || state == .paused else { return }
+        guard !automaticEnabled, !isDeletingRoute, state == .idle || state == .paused else { return }
         switch locationManager.authorizationStatus {
         case .notDetermined:
             state = .requestingPermission
@@ -81,6 +185,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
 
     func canDelete(_ route: RecordedRoute) -> Bool {
         guard !isDeletingRoute, route.modelContext === context, !route.isDeleted else { return false }
+        if automaticTrips.route?.id == route.id && !route.isFinished { return false }
         return activeRoute?.id != route.id || state == .paused
     }
 
@@ -92,6 +197,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         let id = route.id
         let wasActive = activeRoute?.id == id
         try await summaryIndex.prepareToDelete(routeID: id)
+        let wasAutomatic = automaticTrips.route?.id == id
         context.delete(route)
         do {
             try context.save()
@@ -101,6 +207,7 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
             throw error
         }
 
+        if wasAutomatic { automaticTrips.forget() }
         if wasActive {
             activeRoute = nil
             recoveredUnfinishedRoute = false
@@ -110,6 +217,21 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if automaticEnabled {
+            needsPreciseLocation = manager.accuracyAuthorization == .reducedAccuracy
+            switch manager.authorizationStatus {
+            case .authorizedAlways: startAutomaticStream()
+            case .authorizedWhenInUse where automaticTask == nil:
+                requestAutomaticAuthorization()
+            case .notDetermined: break
+            default:
+                if automaticTask != nil {
+                    stopAutomatic()
+                    notice = "自动记录已关闭。允许始终定位后，可以重新开启。"
+                } else { automaticNeedsSettings = true }
+            }
+            return
+        }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             needsPreciseLocation = manager.accuracyAuthorization == .reducedAccuracy
@@ -175,7 +297,10 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         )
         request.fetchLimit = 1
         do {
-            activeRoute = try context.fetch(request).first
+            let saved = try context.fetch(request).first
+            if automaticEnabled && saved?.isAutomatic == true { return }
+            if saved != nil && automaticEnabled { cancelAutomaticStream() }
+            activeRoute = saved
             if activeRoute != nil {
                 state = .paused
                 recoveredUnfinishedRoute = true
@@ -196,6 +321,16 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
                 context.rollback()
                 state = .idle
                 notice = "路线无法保存。请检查设备的可用存储空间后重试。"
+                return
+            }
+        }
+        if let activeRoute, activeRoute.isAutomatic == true {
+            activeRoute.isAutomatic = nil
+            activeRoute.automaticPauseAt = nil
+            do { try context.save() }
+            catch {
+                context.rollback()
+                notice = "暂时无法继续这条记录，请检查可用存储空间。"
                 return
             }
         }

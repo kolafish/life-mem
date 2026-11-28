@@ -11,6 +11,12 @@ Life Mem 是一个 iPhone 路线记录工具。点「开始记录」，锁屏后
 3. 点「开始记录」，授予使用期间的定位权限并保留精确位置。允许「运动与健身」可以更好地识别步行、骑行和乘车。
 4. 锁屏步行一段并中途停留，再解锁、暂停、回看路线。另一次以乘客身份测试乘车，在抵达后比对两种模式和路线覆盖情况。恢复记录后应出现新路线段，关掉 App 再打开应能查到已保存的轨迹。
 
+## 自动记录（试用）
+
+在「记录」页开启「自动记录（试用）」，允许始终定位并开启精确位置，即可锁屏出行。手动路线结束后可以开启试用，关闭试用即可使用手动记录。系统交付的实时位置由同一套采样规则写入本机路线库和回顾。
+
+为减少静置漂移，90 秒内的两个有效位置须相距至少 25 米且达到两点水平精度之和，确认后从第一个位置开始保存。系统报告静止时保存并结束路线。若在 8 分钟内从停下位置附近（100 米内）再次出发，会接回同一条路线并新开一段。较长停留下次出发时另起路线。若系统持续投递位置，低速定位在约 25 米（精度较低时放宽至水平误差）范围内持续 8 分钟也会收尾。iOS 决定锁屏定位的投递时机；试用时可在回顾中核对起点、途中停顿和终点。
+
 ## 自适应采样
 
 App 使用系统定位和运动识别，按运动状态设置定位精度与距离门槛。下表是本项目的初始参数。系统按可用的定位信号和设备状态决定何时交付坐标。
@@ -56,7 +62,7 @@ App 使用系统定位和运动识别，按运动状态设置定位精度与距�
 ```sh
 mkdir -p DerivedData
 xcrun swiftc -parse-as-library \
-  LifeMem/{LocationPoint,RouteModels,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior,RouteInsights,RouteMapProjection}.swift \
+  LifeMem/{LocationPoint,RouteModels,AutomaticTrips,SegmentBuilder,TimelineSegment,Routes,RouteSummary,SavedPlace,PlaceResolver,PlaceSuggestions,RouteAnalytics,RouteBehavior,RouteInsights,RouteMapProjection}.swift \
   tests/RouteChecks.swift -o DerivedData/route-checks
 ./DerivedData/route-checks
 ```
@@ -75,7 +81,11 @@ xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
 
 在已启动的 iPhone 模拟器上运行，使用隔离的临时存储和合成路线。将 `SIMULATOR_ID` 换成 `xcrun simctl list devices booted` 中的模拟器 ID。
 
+自动记录界面用例使用模拟器的始终定位权限。可用上方模拟器构建产物安装并授权。
+
 ```sh
+xcrun simctl install SIMULATOR_ID DerivedData/simulator/Build/Products/Debug-iphonesimulator/LifeMem.app
+xcrun simctl privacy SIMULATOR_ID grant location-always dev.kolafish.lifemem
 xcodebuild -project LifeMem.xcodeproj -scheme LifeMem -configuration Debug \
   -destination 'id=SIMULATOR_ID' -derivedDataPath DerivedData/ui-tests \
   -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
