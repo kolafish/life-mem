@@ -264,24 +264,51 @@ enum SegmentBuilder {
         config.stayRadius = stayRadius
         config.minStayDuration = minimumVisitDuration
         config.maxHorizontalAccuracy = LocationSampling.accuracyLimit
-        var stays = StayDetector(config: config).detect(fixes, now: last.timestamp)
-        if preserveNamedStart, stays.first?.start != first.timestamp {
-            // Older releases stored a correction on the first observed fix, including approach-edge fixes.
-            // Keep that fix as the edit owner when the full cluster supports the previously named visit.
-            config.stayCoreRadius = config.stayRadius
-            stays = StayDetector(config: config).detect(fixes, now: last.timestamp)
-        }
+        let detector = StayDetector(config: config)
+        var stays = detector.detect(fixes, now: last.timestamp)
         var cursor = points.startIndex
-        return stays.compactMap { stay in
+        var result: [(Range<Int>, CLLocationCoordinate2D)] = []
+        if preserveNamedStart, stays.first?.start != first.timestamp,
+           let end = legacyNamedEnd(in: points) {
+            // Older edits belong to a specific first fix. Preserve that observed visit even when
+            // the newer moving centroid would trim the owner or divide its cluster.
+            let count = end - cursor
+            let members = fixes.prefix(count).filter { Geo.distance($0.coordinate, fixes[0].coordinate) <= stayRadius }
+            let center = Geo.centroid(members.map(\.coordinate), weights: members.map { 1 / max($0.horizontalAccuracy ?? 5, 5) })
+                ?? fixes[0].coordinate
+            result.append((cursor..<end, CLLocationCoordinate2D(latitude: center.latitude,
+                                                                longitude: wrapped(center.longitude + meridian))))
+            cursor = end
+            stays = detector.detect(Array(fixes.dropFirst(count)), now: last.timestamp)
+        }
+        for stay in stays {
             while cursor < points.endIndex, points[cursor].timestamp < stay.start { cursor += 1 }
             let start = cursor
             let end = stay.end ?? last.timestamp
             while cursor < points.endIndex, points[cursor].timestamp <= end { cursor += 1 }
             guard start < cursor,
-                  points[cursor - 1].timestamp.timeIntervalSince(points[start].timestamp) >= minimumVisitDuration else { return nil }
+                  points[cursor - 1].timestamp.timeIntervalSince(points[start].timestamp) >= minimumVisitDuration else { continue }
             let center = CLLocationCoordinate2D(latitude: stay.centroid.latitude,
                                                 longitude: wrapped(stay.centroid.longitude + meridian))
-            return (start..<cursor, center)
+            result.append((start..<cursor, center))
         }
+        return result
+    }
+
+    /// Compatibility for a user-named visit written by the original fixed-anchor detector.
+    private static func legacyNamedEnd<ID>(in points: ArraySlice<LocationPoint<ID>>) -> Int? {
+        let start = points.startIndex
+        let anchor = points[start].coordinate.location
+        var end = start + 1
+        while end < points.endIndex {
+            let distance = points[end].coordinate.location.distance(from: anchor)
+            if distance > stayRadius {
+                let next = end + 1
+                guard distance <= stayRadius + points[end].accuracy, next < points.endIndex,
+                      points[next].coordinate.location.distance(from: anchor) <= stayRadius else { break }
+            }
+            end += 1
+        }
+        return points[end - 1].timestamp.timeIntervalSince(points[start].timestamp) >= minimumVisitDuration ? end : nil
     }
 }

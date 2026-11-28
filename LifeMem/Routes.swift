@@ -228,9 +228,9 @@ struct RouteReview {
                 let arrival = trailing.flatMap { point in
                     nextCoordinate.map { RouteJourney.StayConnection(coordinate: $0, time: point.timestamp) }
                 }
-                if var journey = Self.journey(in: completeSegments, departure: previousCoordinate, arrival: arrival) {
-                    journey.endpoints.startName = startName
-                    journey.endpoints.endName = endName
+                if var journey = Self.journey(in: completeSegments, points: slice.points, departure: previousCoordinate, arrival: arrival) {
+                    if journey.departureStay != nil { journey.endpoints.startName = startName }
+                    if journey.arrivalStay != nil { journey.endpoints.endName = endName }
                     contribution.journeys.append(journey)
                 }
             }
@@ -239,13 +239,19 @@ struct RouteReview {
     }
 
     private static func journey(
-        in segments: [RouteActivitySegment],
+        in segments: [RouteActivitySegment], points: ArraySlice<LocationPoint<PersistentIdentifier>>,
         departure: CLLocationCoordinate2D?,
         arrival: RouteJourney.StayConnection?
     ) -> RouteJourney? {
         let moving = segments.filter { $0.distanceMeters > 0 }
-        guard let first = moving.first, let last = moving.last,
-              let endpoints = endpoints(in: moving, previousVisit: departure, nextVisit: arrival?.coordinate) else { return nil }
+        guard let first = moving.first, let last = moving.last else { return nil }
+        // A zero-distance fix can touch a visit even when the first measured movement is across a signal gap.
+        let gaps = points.indices.dropFirst().filter { !points[$0].continuesObservation(after: points[$0 - 1]) }
+        let detachedStart = gaps.contains { points[$0].timestamp <= first.movementStartedAt }
+        let detachedEnd = gaps.contains { points[$0 - 1].timestamp >= last.endedAt }
+        let departure = detachedStart ? nil : departure
+        let arrival = detachedEnd ? nil : arrival
+        guard let endpoints = endpoints(in: moving, previousVisit: departure, nextVisit: arrival?.coordinate) else { return nil }
         let seconds = last.endedAt.timeIntervalSince(first.movementStartedAt)
         guard seconds > 0 else { return nil }
         let durations = moving.reduce(into: [TravelMode: TimeInterval]()) {

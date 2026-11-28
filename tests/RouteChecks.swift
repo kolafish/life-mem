@@ -446,6 +446,27 @@ struct RouteChecks {
         try VisitCorrection.save(edited, name: nil, in: context)
         precondition(owner.visitName == nil)
 
+        // All fixes fit the old named anchor radius, while HHTCore's moving centre sees two clusters.
+        var wideSamples: [Sample] = [(0, 0, .stationary, true)]
+        for offset in stride(from: 30, through: 900, by: 30) {
+            let longitude = offset <= 180 ? 0.00049 : -0.00049
+            wideSamples.append((TimeInterval(offset), longitude, .stationary, false))
+        }
+        let wide = insertRoute(context: context, start: start, samples: wideSamples)
+        let wideOwner = wide.points.first { $0.timestamp == start }!
+        wideOwner.visitName = "原有名称"
+        try context.save()
+        let wideStays = RouteReview(routes: [wide], calendar: .current).days.flatMap(\.stays)
+        precondition(wideStays.count == 1 && wideStays[0].visitID == wideOwner.persistentModelID)
+        precondition(wideStays[0].visitName == wideOwner.visitName && wideStays[0].duration == 900)
+
+        let isolatedEdges = insertRoute(context: context, start: start, samples:
+            stop(start: 0, longitude: 0) + [(510, 0, .walking, true), (900, 0.02, .walking, false),
+            (930, 0.021, .walking, false), (1_410, 0.05, .walking, false)] + stop(start: 1_440, longitude: 0.05))
+        let measured = RouteReview(routes: [isolatedEdges], calendar: .current).journeys
+        precondition(measured.count == 1 && measured[0].departureStay == nil && measured[0].arrivalStay == nil)
+        precondition(measured[0].endpoints.start.longitude == 0.02 && measured[0].endpoints.end.longitude == 0.021)
+
         let rejoined = insertRoute(context: context, start: start, samples: approaching + [
             (110, 0.0021, .automotive, true), (140, 0.003, .automotive, false)
         ])
