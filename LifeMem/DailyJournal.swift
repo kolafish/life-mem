@@ -47,6 +47,7 @@ private struct DailyJournal: View {
                     Text(day.journalSummary { resolver.label(near: $0, names: names) })
                         .font(.body).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
                     RouteMapContainer(entries: day.entries, selected: nil, focusRequest: mapFocus) { _ in }
+                        .labelStyle(.iconOnly)
                         .allowsHitTesting(false).accessibilityHidden(true)
                         .frame(height: 172).clipShape(.rect(cornerRadius: 12))
                         .padding(.top, 2)

@@ -80,7 +80,7 @@ struct MemoPlayButton: View {
                     .font(.title2)
                 Text(playback.playing == id ? "停止播放" : "播放原声")
                 Text("\(max(1, Int(duration.rounded()))) 秒")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption.monospacedDigit()).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
             .font(.subheadline.weight(.medium)).frame(minHeight: 44)
         }

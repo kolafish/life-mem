@@ -485,11 +485,10 @@ final class ReviewUITests: XCTestCase {
         day.tap()
         let stay = app.buttons.matching(identifier: "timeline-entry")
             .matching(NSPredicate(format: "label CONTAINS %@", "停留地点")).firstMatch
-        scrollTo(stay, in: app, horizontalOffset: 0.98)
-        XCTAssertTrue(stay.isHittable)
+        XCTAssertTrue(revealTimelineControl(stay, in: app))
         stay.tap()
         let edit = app.buttons["编辑地名"]
-        scrollTo(edit, in: app, horizontalOffset: 0.98)
+        XCTAssertTrue(revealTimelineControl(edit, in: app))
         edit.tap()
 
         let rebuild = app.buttons["重建地名文件"]
