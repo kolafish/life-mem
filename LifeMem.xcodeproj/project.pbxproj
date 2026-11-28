@@ -35,6 +35,7 @@
 		AA0000000000000000000441 /* RouteInsightCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000341 /* RouteInsightCards.swift */; };
 		AA0000000000000000000442 /* RouteMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000342 /* RouteMapProjection.swift */; };
 		AA0000000000000000000443 /* AMapMainlandCoverage.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000343 /* AMapMainlandCoverage.json */; };
+		AF0000000000000000000001 /* HHTCore in Frameworks */ = {isa = PBXBuildFile; productRef = AF0000000000000000000002 /* HHTCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,6 +82,23 @@
 		AA0000000000000000000342 /* RouteMapProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteMapProjection.swift; sourceTree = "<group>"; };
 		AA0000000000000000000343 /* AMapMainlandCoverage.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AMapMainlandCoverage.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AF0000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AF0000000000000000000001 /* HHTCore in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AF0000000000000000000004 /* HHTCore */ = {isa = XCLocalSwiftPackageReference; relativePath = ThirdParty/HHTCore; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AF0000000000000000000002 /* HHTCore */ = {isa = XCSwiftPackageProductDependency; package = AF0000000000000000000004 /* HHTCore */; productName = HHTCore; };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXGroup section */
 		AA0000000000000000000021 = {
@@ -140,10 +158,11 @@
 		AA0000000000000000000031 /* LifeMem */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = AA0000000000000000000052 /* Target configurations */;
-			buildPhases = (AA0000000000000000000041 /* Sources */, AA0000000000000000000042 /* Resources */);
+			buildPhases = (AA0000000000000000000041 /* Sources */, AF0000000000000000000003 /* Frameworks */, AA0000000000000000000042 /* Resources */);
 			buildRules = ();
 			dependencies = ();
 			name = LifeMem;
+			packageProductDependencies = (AF0000000000000000000002 /* HHTCore */);
 			productName = LifeMem;
 			productReference = AA0000000000000000000007 /* LifeMem.app */;
 			productType = "com.apple.product-type.application";
@@ -176,6 +195,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (en, Base);
 			mainGroup = AA0000000000000000000021;
+			packageReferences = (AF0000000000000000000004 /* HHTCore */);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000023 /* Products */;
 			projectDirPath = "";
@@ -251,6 +271,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
+				ONLY_ACTIVE_ARCH = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
@@ -273,7 +294,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";
@@ -292,7 +313,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeMem/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Life Mem";

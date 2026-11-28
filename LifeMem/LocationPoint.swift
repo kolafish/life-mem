@@ -9,6 +9,11 @@ struct LocationPoint<ID: Hashable> {
     let mode: TravelMode
     let startsNewSegment: Bool
     let startsRecordingRun: Bool?
+
+    func continuesObservation(after previous: Self) -> Bool {
+        let elapsed = timestamp.timeIntervalSince(previous.timestamp)
+        return startsRecordingRun != true && elapsed > 0 && elapsed <= LocationSampling.maximumGap
+    }
 }
 
 struct StoredCoordinate: Codable, Sendable {

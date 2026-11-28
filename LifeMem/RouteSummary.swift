@@ -20,10 +20,10 @@ struct DailySummary: Codable, Sendable {
         stays = day.stays
     }
 
-    init(date: Date, combining summaries: [DailySummary]) {
+    init(date: Date, combining summaries: [DailySummary], excluding incorporated: Set<PersistentIdentifier>) {
         self.date = date
         movement = summaries.flatMap(\.movement)
-        stays = summaries.flatMap(\.stays)
+        stays = summaries.flatMap(\.stays).filter { !incorporated.contains($0.visitID) }
     }
 }
 
@@ -58,13 +58,16 @@ struct RouteSummary: Sendable {
     }
 
     init(records: [RouteSummaryRecord], calendar: Calendar = .current) {
-        let confirmed = AutomaticVisitBoundary.candidates(in: records.compactMap(\.boundary), calendar: calendar).filter(\.isConfirmed)
+        let resolved = ResolvedVisitGaps(records.compactMap { item in
+            item.boundary.map { ($0, item.visits) }
+        }, calendar: calendar)
+        let confirmed = resolved.gaps.filter(\.isConfirmed)
         let extra = confirmed.flatMap { visit in
             visit.dailyInferredStays(calendar: calendar).map { DailySummary(date: $0.0, inferredStay: $0.1) }
         }
         let byDate = Dictionary(grouping: records.flatMap(\.days) + extra, by: \.date)
-        days = byDate.keys.sorted(by: >).map { DailySummary(date: $0, combining: byDate[$0, default: []]) }
-        places = RoutePlace.group(records.flatMap(\.visits) + confirmed, within: RouteReview.placeRadius)
+        days = byDate.keys.sorted(by: >).map { DailySummary(date: $0, combining: byDate[$0, default: []], excluding: resolved.incorporated) }
+        places = RoutePlace.group(resolved.placeVisits(records.flatMap(\.visits)), within: RouteReview.placeRadius)
         recall = VisitRecallIndex(places: places)
         let edges = ConfirmedVisitEdges(visits: confirmed)
         journeys = records.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
@@ -73,7 +76,7 @@ struct RouteSummary: Sendable {
 
 actor RouteSummaryIndex {
     // Increment when the stored fields or the segmentation and projection rules change.
-    private static let version = 3
+    private static let version = 4
 
     private struct Index: Codable {
         let version: Int
@@ -169,7 +172,8 @@ actor ArchiveSummaryReader {
             var query = FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == id })
             query.fetchLimit = 1
             guard let route = try context.fetch(query).first, route.pointCount == version.pointCount,
-                  route.visitRevision == version.visitRevision, route.endedAtRest == version.endedAtRest else { return nil }
+                  route.visitRevision == version.visitRevision, route.endedAtRest == version.endedAtRest,
+                  route.isAutomatic == version.isAutomatic else { return nil }
             updated[version] = RouteReview.summaryRecord(for: route, calendar: revision.calendar)
         }
         try Task.checkCancellation()

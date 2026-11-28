@@ -63,8 +63,8 @@ struct RouteChecks {
         precondition(savedSegments.map(\.endedAt) == [nearby.timestamp, afterGap.timestamp])
         precondition(savedSegments.map { $0.coordinates.count } == [2, 1])
         let savedReview = RouteReview(routes: routes, calendar: .current)
-        precondition(savedReview.days.flatMap(\.entries).count == 2)
-        precondition(savedReview.days.flatMap(\.entries).filter(\.followsGap).count == 1)
+        precondition(savedReview.days.flatMap(\.entries).count == 1)
+        precondition(savedReview.days.flatMap(\.moves).count == 1)
         context.delete(route)
         try context.save()
         let remainingPoints = try context.fetchCount(FetchDescriptor<RoutePoint>())
@@ -92,6 +92,7 @@ struct RouteChecks {
         precondition(segments[2].coordinates.count == 1)
         checkPureSegmentBuilder(at: start)
         try checkReview(context: context)
+        try checkTripBoundaries(context: context, start: start)
         checkCoverageDates()
         try checkRouteReviewCache(context: context)
         try checkSemanticTimeline(context: context)
@@ -290,7 +291,7 @@ struct RouteChecks {
         let review = RouteReview(routes: [outing, repeatedVisit, drift], calendar: calendar)
         precondition(review.days.map(\.date) == [day, previousDay])
         let today = review.days[0].entries
-        precondition(today.map(\.kind) == [.trip, .visit, .trip, .trip, .trip, .fragment])
+        precondition(today.map(\.kind) == [.trip, .visit, .trip, .trip, .fragment])
         precondition(today[0].segments.map(\.mode) == [.walking, .automotive, .stationary, .automotive])
         precondition(today[1].endedAt.timeIntervalSince(today[1].startedAt) == 480)
         precondition(today[0].endpoints?.start.longitude == 0)
@@ -301,8 +302,8 @@ struct RouteChecks {
         precondition(today[3].endpoints?.start.longitude == 0.03)
         precondition(today[2].segments.last?.coordinates.last?.longitude == 0)
         precondition(today[0].segments.first?.coordinates.first?.longitude == 0)
-        precondition(today.filter(\.followsGap).map(\.startedAt) == [morning.addingTimeInterval(730), morning.addingTimeInterval(880)])
-        precondition(today[4].segments[0].coordinates.map(\.longitude) == [0.04, 0.0402])
+        precondition(today.filter(\.followsGap).map(\.startedAt) == [morning.addingTimeInterval(730)])
+        precondition(today[3].segments[1].coordinates.map(\.longitude) == [0.04, 0.0402])
         precondition(review.places.map { $0.visits.count } == [2])
         precondition(review.places[0].visits.map(\.date) == [previousDay, day])
         precondition(review.places[0].mostRecentVisit.id == today[1].id)
@@ -377,7 +378,7 @@ struct RouteChecks {
         ])
         let gapDays = RouteReview(routes: [gap], calendar: calendar).days
         precondition(gapDays.count == 2 && gapDays.allSatisfy { $0.moves.isEmpty })
-        precondition(gapDays[0].entries[0].followsGap)
+        precondition(gapDays.allSatisfy { $0.entries.count == 1 && $0.movingDuration == 0 })
 
         let dateline = insertRoute(context: context, start: nextDay.addingTimeInterval(-10), samples: [
             (0, 179.9998, .walking, true), (20, -179.9998, .walking, false)
@@ -393,6 +394,90 @@ struct RouteChecks {
         let ranked = RouteAnalytics(review: rankedReview, range: previousDay...day, calendar: calendar, now: nextDay) { _ in nil }
         precondition(ranked.topPlaces(by: .visits).first?.visits == 2)
         precondition(ranked.topPlaces(by: .duration).first?.seconds == 1_200)
+    }
+
+    @MainActor
+    private static func checkTripBoundaries(context: ModelContext, start: Date) throws {
+        let approaching: [Sample] = [(0, 0, .automotive, true), (30, 0.002, .automotive, false)]
+        let sparse: [Sample] = (1...5).map { i in
+            (30 + Double(i * 91), 0.002 + Double(i) * 0.00005, .automotive, true)
+        }
+        func entries(_ samples: [Sample], automatic: Bool = true) -> [RouteReviewEntry] {
+            let route = insertRoute(context: context, start: start, samples: samples)
+            route.isAutomatic = automatic
+            return RouteReview(routes: [route], calendar: .current).days.flatMap(\.entries)
+        }
+        let traffic = entries(approaching + sparse + [(510, 0.004, .automotive, false)])
+        precondition(traffic.map(\.kind) == [.trip] && traffic[0].moves.count == 2)
+        precondition(traffic[0].endedAt == start.addingTimeInterval(510))
+        precondition(traffic[0].moves.reduce(0) { $0 + $1.duration } == 55)
+
+        let shop = stop(start: 530, longitude: 0.004)
+        let departure: [Sample] = [(1_040, 0.0046, .walking, true), (1_070, 0.005, .walking, false)]
+        let visits = entries(approaching + sparse + shop + departure)
+        precondition(visits.map(\.kind) == [.trip, .visit, .trip] && visits[1].stay?.duration == 480)
+
+        // Two nearby fixes across a blind interval cannot establish a visit.
+        let blind: [Sample] = [(60, 0.002, .stationary, true), (1_260, 0.002, .stationary, true)]
+        let tunnel = entries(approaching + blind + [(1_290, 0.003, .automotive, true), (1_320, 0.005, .automotive, false)])
+        precondition(tunnel.map(\.kind) == [.trip] && tunnel[0].moves.allSatisfy { $0.duration <= 30 })
+        let noFlag = entries(approaching + [(1_350, 0.12, .automotive, false), (1_380, 0.122, .automotive, false)])
+        precondition(noFlag.map(\.kind) == [.trip] && noFlag[0].moves.map(\.duration) == [30, 30])
+
+        let interruptedDwell: [Sample] = [(60, 0.002, .stationary, false), (90, 0.002, .stationary, false),
+                                          (540, 0.002, .stationary, true), (570, 0.002, .stationary, false)]
+        precondition(entries(approaching + interruptedDwell + departure).map(\.kind) == [.trip])
+
+        let named = insertRoute(context: context, start: start, samples:
+            [(0, -0.00045, .stationary, true)] + stop(start: 30, longitude: 0) +
+            [(750, 0.05, .walking, false), (780, 0.051, .walking, false)] + stop(start: 1_230, longitude: 0.1))
+        let owner = named.points.first { $0.timestamp == start }!
+        for point in named.points { point.startsRecordingRun = point === owner }
+        owner.visitName = "旧地名"
+        try context.save()
+        let old = RouteReview(routes: [named], calendar: .current)
+        let edited = old.days.flatMap(\.stays).first!
+        precondition(edited.visitID == owner.persistentModelID && edited.visitName == "旧地名")
+        let journey = old.journeys.first!
+        precondition(journey.departureStay == nil && journey.arrivalStay == nil)
+        precondition(journey.endpoints.startName == nil && journey.endpoints.endName == nil)
+        try VisitCorrection.save(edited, name: "新地名", in: context)
+        precondition(owner.visitName == "新地名")
+        try VisitCorrection.save(edited, name: nil, in: context)
+        precondition(owner.visitName == nil)
+
+        // All fixes fit the old named anchor radius, while HHTCore's moving centre sees two clusters.
+        var wideSamples: [Sample] = [(0, 0, .stationary, true)]
+        for offset in stride(from: 30, through: 900, by: 30) {
+            let longitude = offset <= 180 ? 0.00049 : -0.00049
+            wideSamples.append((TimeInterval(offset), longitude, .stationary, false))
+        }
+        let wide = insertRoute(context: context, start: start, samples: wideSamples)
+        let wideOwner = wide.points.first { $0.timestamp == start }!
+        wideOwner.visitName = "原有名称"
+        try context.save()
+        let wideStays = RouteReview(routes: [wide], calendar: .current).days.flatMap(\.stays)
+        precondition(wideStays.count == 1 && wideStays[0].visitID == wideOwner.persistentModelID)
+        precondition(wideStays[0].visitName == wideOwner.visitName && wideStays[0].duration == 900)
+
+        let isolatedEdges = insertRoute(context: context, start: start, samples:
+            stop(start: 0, longitude: 0) + [(510, 0, .walking, true), (900, 0.02, .walking, false),
+            (930, 0.021, .walking, false), (1_410, 0.05, .walking, false)] + stop(start: 1_440, longitude: 0.05))
+        let measured = RouteReview(routes: [isolatedEdges], calendar: .current).journeys
+        precondition(measured.count == 1 && measured[0].departureStay == nil && measured[0].arrivalStay == nil)
+        precondition(measured[0].endpoints.start.longitude == 0.02 && measured[0].endpoints.end.longitude == 0.021)
+
+        let rejoined = insertRoute(context: context, start: start, samples: approaching + [
+            (110, 0.0021, .automotive, true), (140, 0.003, .automotive, false)
+        ])
+        let resumed = rejoined.points.first { $0.timestamp == start.addingTimeInterval(110) }!
+        resumed.startsRecordingRun = true
+        rejoined.isAutomatic = true
+        let automatic = RouteReview(routes: [rejoined], calendar: .current)
+        precondition(automatic.days.flatMap(\.entries).count == 1 && automatic.days.flatMap(\.moves).count == 2)
+        rejoined.isAutomatic = false
+        let manual = RouteReview(routes: [rejoined], calendar: .current)
+        precondition(manual.days.flatMap(\.entries).map(\.kind) == [.trip, .trip])
     }
 
     private static func checkCoverageDates() {
@@ -1359,6 +1444,35 @@ struct RouteChecks {
             let sequence = RouteReviewDay(date: midnight, entries: [stay, separate]).placeSequence { _ in nil }
             precondition(sequence == "测试书店 → 学校 → 车站")
         } else { preconditionFailure("Missing synthetic movement or stop") }
+        // A previously confirmed gap touches a newly recognized observed stay in the arriving route.
+        let arriving = route(midnight.addingTimeInterval(4_000), 0, 0.002)
+        for offset in stride(from: 90, through: 810, by: 30) {
+            let longitude = (390...420).contains(offset) ? 0.003 : 0.002
+            let fix = location(longitude: longitude, at: arriving.startedAt.addingTimeInterval(Double(offset)))
+            context.insert(RoutePoint(location: fix, mode: .stationary, startsNewSegment: offset == 90, route: arriving))
+            arriving.pointCount += 1
+        }
+        let leaving = route(arriving.startedAt.addingTimeInterval(2_010), 0.002, 0.003)
+        leaving.previousAutomaticRouteID = arriving.id
+        arriving.endedAtRest = true
+        leaving.arrivalDecision = "confirmed"
+        leaving.arrivalName = "已确认的店"
+        try context.save()
+        let joined = RouteReview(routes: [leaving, arriving], calendar: calendar)
+        let joinedIndex = RouteSummary(records: [leaving, arriving].map { RouteReview.summaryRecord(for: $0, calendar: calendar) },
+                                       calendar: calendar)
+        for places in [joined.places, joinedIndex.places] {
+            precondition(places.count == 1 && places[0].visits.count == 1)
+            let v = places[0].visits[0]
+            precondition(v.id == leaving.persistentModelID && v.isConfirmed && v.visitName == "已确认的店")
+            precondition(v.endedAt.timeIntervalSince(v.startedAt) == 1_920)
+        }
+        precondition(joined.days.flatMap(\.stays).map(\.duration) == [1_920])
+        precondition(joinedIndex.days.flatMap(\.stays).map(\.duration) == [1_920])
+        try VisitCorrection.save(joined.days[0].stays[0], name: nil, ignore: true, in: context)
+        let ignored = RouteReview(routes: [leaving, arriving], calendar: calendar)
+        precondition(ignored.days.flatMap(\.stays).map(\.duration) == [720])
+
         let visitStart = midnight.addingTimeInterval(5000)
         let observed = RecordedRoute(startedAt: visitStart)
         context.insert(observed)
