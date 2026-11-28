@@ -188,7 +188,9 @@ struct WeeklyVisits: Sendable {
                     else { return nil }
                     return DateInterval(start: begin, end: end)
                 }
-                guard historical.count == b.count else { return false }
+                guard historical.count == b.count,
+                      zip(historical, historical.dropFirst()).allSatisfy({ $0.end <= $1.start })
+                else { return false }
                 var overlap = 0.0, i = 0, j = 0
                 while i < a.count && j < historical.count {
                     let left = a[i], right = historical[j]

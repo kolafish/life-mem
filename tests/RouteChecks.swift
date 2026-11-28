@@ -1212,6 +1212,26 @@ struct RouteChecks {
                                      calendar: pacific, now: sunday.addingTimeInterval(5 * 3600))
         precondition(afterJump.places.first?.current.visits.count == 1 && afterJump.places.first?.usualDays == nil)
 
+        let ordinarySunday = pacific.date(from: DateComponents(year: 2026, month: 11, day: 8))!
+        let autumn = (0...4).map { week -> RouteSummaryRecord in
+            let day = pacific.date(byAdding: .weekOfYear, value: -week, to: ordinarySunday)!
+            let repeatedHour = week == 1
+            let starts = repeatedHour ? [4200.0, 7800.0] : [3900.0]
+            var days: [DailySummary] = []
+            var visits: [RouteVisit] = []
+            for offset in starts {
+                let time = day.addingTimeInterval(offset)
+                let id = RecordedRoute(startedAt: time).persistentModelID
+                let stay = StayEvent(id: id, visitID: id, coordinate: .init(latitude: 0, longitude: 0), startedAt: time,
+                                     endedAt: time.addingTimeInterval(repeatedHour ? 600 : 1200))
+                days.append(DailySummary(date: day, inferredStay: stay))
+                visits.append(RouteVisit(id: id, date: day, startedAt: time, endedAt: stay.endedAt, coordinate: stay.coordinate))
+            }
+            return RouteSummaryRecord(days: days, visits: visits, journeys: [])
+        }
+        let afterFall = WeeklyVisits(summary: RouteSummary(records: autumn, calendar: pacific),
+                                     calendar: pacific, now: ordinarySunday.addingTimeInterval(5 * 3600))
+        precondition(afterFall.places.first?.usualDays == nil)
         for (zone, firstWeekday, month, date) in [("UTC", 2, 11, 23), ("America/Santiago", 1, 9, 6)] {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: zone)!
