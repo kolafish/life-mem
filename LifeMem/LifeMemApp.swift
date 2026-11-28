@@ -102,6 +102,8 @@ private struct RootView: View {
     let recorder: RouteRecorder
     @State private var selection = Tab.record
     @State private var today = Date.now
+    @Environment(\.modelContext) private var modelContext
+    @State private var historyReader = ArchiveSummaryReader()
     @State private var todayCache = RouteReviewCache()
     @State private var todayReview: RouteReview?
     @State private var review: RouteReview?
@@ -149,15 +151,12 @@ private struct RootView: View {
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)
             }
-            let indexed = await index.records(for: request.revision)
-            guard !Task.isCancelled,
-                  request.revision == RouteReviewRevision(calendar: calendar, routes: routes) else { return }
-            let records = reviewCache.summaries(for: routes, revision: request.revision, indexed: indexed)
-            if summaryRevision != request.revision {
-                summary = RouteSummary(records: request.revision.routes.compactMap { records[$0] }, calendar: request.revision.calendar)
+            guard summaryRevision != request.revision else { return }
+            if let result = try? await historyReader.load(request.revision, container: modelContext.container, index: index),
+               !Task.isCancelled, request.revision == RouteReviewRevision(calendar: calendar, routes: routes) {
+                summary = result
                 summaryRevision = request.revision
             }
-            await index.save(records, for: request.revision, after: .seconds(1))
         }
         .task(id: prefetch) {
             guard let prefetch else { return }

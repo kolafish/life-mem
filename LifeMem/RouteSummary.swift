@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 struct DailySummary: Codable, Sendable {
     let date: Date
@@ -142,5 +143,38 @@ actor RouteSummaryIndex {
         let data = try JSONEncoder().encode(updated)
         try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         index = updated
+    }
+}
+
+actor ArchiveSummaryReader {
+    private var lastCalendar: Calendar?
+    private var records: [RouteReviewRevision.RouteVersion: RouteSummaryRecord] = [:]
+
+    func load(_ revision: RouteReviewRevision, container: ModelContainer, index: RouteSummaryIndex) async throws -> RouteSummary? {
+        let disk = await index.records(for: revision)
+        try Task.checkCancellation()
+        let context = ModelContext(container)
+        if lastCalendar != revision.calendar { records = [:] }
+        lastCalendar = revision.calendar
+        var updated = [RouteReviewRevision.RouteVersion: RouteSummaryRecord]()
+        for version in revision.routes {
+            try Task.checkCancellation()
+            if let cached = records[version] ?? disk[version] {
+                updated[version] = cached
+                continue
+            }
+            let id = version.id
+            var query = FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == id })
+            query.fetchLimit = 1
+            guard let route = try context.fetch(query).first, route.pointCount == version.pointCount,
+                  route.visitRevision == version.visitRevision, route.endedAtRest == version.endedAtRest else { return nil }
+            updated[version] = RouteReview.summaryRecord(for: route, calendar: revision.calendar)
+        }
+        try Task.checkCancellation()
+        records = updated
+        let summary = RouteSummary(records: revision.routes.compactMap { updated[$0] }, calendar: revision.calendar)
+        try Task.checkCancellation()
+        await index.save(updated, for: revision)
+        return summary
     }
 }

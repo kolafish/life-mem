@@ -339,7 +339,7 @@ struct RecordedVisitDestination: View {
         let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
         Group {
             if let day, let entry = day.entries.first(where: { $0.stay?.visitID == visit.id }) {
-                RouteDayReviewView(day: day, focus: entry.id).environment(\.currentRouteReview, nil)
+                RouteDayReviewView(day: day, focus: entry.id, allowsAutomaticLookup: false).environment(\.currentRouteReview, nil)
             } else if loaded {
                 ContentUnavailableView("这次到访已更新", systemImage: "calendar")
             } else { ProgressView() }
@@ -473,6 +473,7 @@ struct RouteDayReviewView: View {
                 if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }
             }
         }
+        .accessibilityIdentifier("review-date-\(Int(day.date.timeIntervalSince1970))")
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(day.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
         .navigationBarTitleDisplayMode(.inline)

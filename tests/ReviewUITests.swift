@@ -54,6 +54,27 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["到访记录"].waitForExistence(timeout: 5))
     }
 
+    func testPreviousAndFirstSourceOpenTheCorrectOccurrence() {
+        let app = launch(fixture: "day")
+        let office = app.buttons.matching(identifier: "today-entry")
+            .matching(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
+        scrollTo(office, in: app)
+        office.tap()
+        let last = app.buttons.matching(identifier: "visit-memory").matching(NSPredicate(format: "label CONTAINS %@", "上次")).firstMatch
+        scrollTo(last, in: app)
+        last.tap()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))!
+        let id = "review-date-\(Int(yesterday.timeIntervalSince1970))"
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: id).firstMatch.waitForExistence(timeout: 5))
+        let selected = app.buttons.matching(identifier: "timeline-entry").matching(NSPredicate(format: "isSelected == true")).firstMatch
+        XCTAssertTrue(selected.label.contains("测试办公室"))
+        let first = app.buttons.matching(identifier: "visit-memory").matching(NSPredicate(format: "label CONTAINS %@", "首次")).firstMatch
+        scrollTo(first, in: app)
+        first.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: id).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(selected.label.contains("测试办公室"))
+    }
+
     func testTodayShowsStopsAndOpensSelectedEntry() {
         let app = launch(fixture: "day")
         let title = app.staticTexts["today-title"]
