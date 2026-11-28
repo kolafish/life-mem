@@ -5,7 +5,7 @@ struct RouteMapContainer: View {
     let entries: [RouteReviewEntry]
     let selected: RouteReviewEntry?
     let focusRequest: UUID
-    let selectStay: (RouteReviewEntry.ID) -> Void
+    let selectEntry: (RouteReviewEntry.ID) -> Void
 
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
@@ -13,7 +13,6 @@ struct RouteMapContainer: View {
 
     private struct Viewport: Equatable {
         let selection: RouteReviewEntry.ID?
-        let endedAt: Date?
         let request: UUID
     }
 
@@ -24,40 +23,76 @@ struct RouteMapContainer: View {
     }
 
     var body: some View {
-        Map(position: $position, interactionModes: [.pan, .zoom]) {
-            ForEach(stayMarkers) { group in
-                Annotation("停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
-                    stayMarker(group)
+        MapReader { proxy in
+            Map(position: $position, interactionModes: [.pan, .zoom]) {
+                ForEach(stayMarkers) { group in
+                    Annotation("停留", coordinate: RouteMapProjection.standard.coordinate(for: group.coordinate)) {
+                        stayMarker(group)
+                    }
+                    .annotationTitles(.hidden)
                 }
-                .annotationTitles(.hidden)
-            }
-            ForEach(entries.filter { $0.stay == nil }) { entry in
-                ForEach(entry.segments) { segment in
-                    let coordinates = segment.coordinates
-                    if segment.mode != .stationary, coordinates.count > 1 {
-                        let focused = selected == nil || selected?.id == entry.id
-                        MapPolyline(coordinates: coordinates.map(RouteMapProjection.standard.coordinate(for:)))
-                            .stroke(segment.mode.mapColor.opacity(focused ? 1 : 0.4), style: StrokeStyle(
-                                lineWidth: focused ? 4 : 3, lineCap: .round, lineJoin: .round,
-                                dash: segment.mode == .walking ? [5, 6] : []
-                            ))
-                    } else if segment.mode != .stationary || entry.kind == .fragment {
-                        Annotation("定位点", coordinate: RouteMapProjection.standard.coordinate(for: segment.startCoordinate)) {
-                            Circle().fill(segment.mode.mapColor).frame(width: 8, height: 8)
+                ForEach(entries.filter { $0.stay == nil }) { entry in
+                    ForEach(entry.segments) { segment in
+                        let coordinates = segment.coordinates
+                        if segment.mode != .stationary, coordinates.count > 1 {
+                            let focused = selected == nil || selected?.id == entry.id
+                            MapPolyline(coordinates: coordinates.map(RouteMapProjection.standard.coordinate(for:)))
+                                .stroke(segment.mode.mapColor.opacity(focused ? 1 : 0.4), style: StrokeStyle(
+                                    lineWidth: focused ? 4 : 3, lineCap: .round, lineJoin: .round,
+                                    dash: segment.mode == .walking ? [5, 6] : []
+                                ))
+                        } else if segment.mode != .stationary || entry.kind == .fragment {
+                            Annotation("定位点", coordinate: RouteMapProjection.standard.coordinate(for: segment.startCoordinate)) {
+                                Circle().fill(segment.mode.mapColor).frame(width: 8, height: 8)
+                            }
+                            .annotationTitles(.hidden)
                         }
-                        .annotationTitles(.hidden)
+                    }
+                    if selected?.id == entry.id, entry.kind == .trip {
+                        tripMarkers(entry)
                     }
                 }
-                if selected?.id == entry.id, entry.kind == .trip {
-                    tripMarkers(entry)
+            }
+            .mapStyle(.standard(emphasis: .muted))
+            .accessibilityIdentifier("daily-route-map")
+            .onChange(of: Viewport(selection: selected?.id, request: focusRequest), initial: true) {
+                position = selected.map(camera(for:)) ?? .automatic
+            }
+            .simultaneousGesture(SpatialTapGesture().onEnded { tap in
+                if let id = trip(at: tap.location, proxy: proxy) { selectEntry(id) }
+            })
+        }
+    }
+
+    private func trip(at tap: CGPoint, proxy: MapProxy) -> RouteReviewEntry.ID? {
+        func screenPoint(_ coordinate: CLLocationCoordinate2D) -> CGPoint? {
+            proxy.convert(RouteMapProjection.standard.coordinate(for: coordinate), to: .local)
+        }
+        // Give the visible stay buttons priority where a trip meets a stop.
+        if stayMarkers.contains(where: { marker in
+            guard let point = screenPoint(marker.coordinate) else { return false }
+            return abs(point.x - tap.x) <= 28 && abs(point.y - tap.y) <= 22
+        }) { return nil }
+
+        var best: RouteReviewEntry.ID?
+        var distance: CGFloat = 20
+        for entry in entries where entry.kind == .trip {
+            for segment in entry.segments where segment.mode != .stationary {
+                var previous: CGPoint?
+                for coordinate in segment.coordinates {
+                    let point = screenPoint(coordinate)
+                    if let a = previous, let b = point {
+                        let dx = b.x - a.x, dy = b.y - a.y
+                        let squared = dx * dx + dy * dy
+                        let t = squared == 0 ? 0 : min(1, max(0, ((tap.x - a.x) * dx + (tap.y - a.y) * dy) / squared))
+                        let offset = hypot(tap.x - a.x - t * dx, tap.y - a.y - t * dy)
+                        if offset < distance { distance = offset; best = entry.id }
+                    }
+                    previous = point
                 }
             }
         }
-        .mapStyle(.standard(emphasis: .muted))
-        .accessibilityIdentifier("daily-route-map")
-        .onChange(of: Viewport(selection: selected?.id, endedAt: selected?.endedAt, request: focusRequest), initial: true) {
-            position = selected.map(camera(for:)) ?? .automatic
-        }
+        return best
     }
 
     private var stayMarkers: [StayMarkers] {
@@ -78,12 +113,12 @@ struct RouteMapContainer: View {
         let detail = group.stays.count == 1 ? routeDuration(group.stays[0].duration) : "\(group.stays.count) 次停留"
         return Group {
             if group.stays.count == 1 {
-                Button { selectStay(group.id) } label: { markerLabel(detail, category: category, selected: isSelected) }
+                Button { selectEntry(group.id) } label: { markerLabel(detail, category: category, selected: isSelected) }
                     .buttonStyle(.plain)
             } else {
                 Menu {
                     ForEach(group.stays) { stay in
-                        Button(clockRange(stay.startedAt, stay.endedAt)) { selectStay(stay.id) }
+                        Button(clockRange(stay.startedAt, stay.endedAt)) { selectEntry(stay.id) }
                     }
                 } label: {
                     markerLabel(detail, category: category, selected: isSelected)

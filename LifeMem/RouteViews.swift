@@ -387,6 +387,8 @@ struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expandedMap = false
+    @State private var scrollAfterMap: RouteReviewEntry.ID?
     @State private var selection: Selection
     @State private var namingTarget: PlaceNamingTarget?
     private let initialFocus: RouteReviewEntry.ID?
@@ -436,6 +438,11 @@ struct RouteDayReviewView: View {
                             HStack {
                                 Text("时间线").font(.headline).accessibilityAddTraits(.isHeader)
                                 Spacer(minLength: 8)
+                                Button { expandedMap = true } label: {
+                                    Label("展开地图", systemImage: "arrow.up.left.and.arrow.down.right")
+                                }
+                                .font(.subheadline)
+                                .frame(minHeight: 44)
                                 if selected != nil {
                                     Button("显示全天") { selection.id = nil }
                                         .font(.subheadline)
@@ -445,9 +452,8 @@ struct RouteDayReviewView: View {
                             .frame(minHeight: 44)
                             RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request) { id in
                                 selection.focus(id)
-                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
-                                    proxy.scrollTo(id, anchor: .bottom)
-                                }
+                                scrollAfterMap = id
+                                expandedMap = true
                             }
                             .frame(height: 184)
                             .clipShape(.rect(cornerRadius: 16))
@@ -458,6 +464,39 @@ struct RouteDayReviewView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
+            }
+            .fullScreenCover(isPresented: $expandedMap, onDismiss: {
+                if let id = scrollAfterMap {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                scrollAfterMap = nil
+            }) {
+                NavigationStack {
+                    RouteMapContainer(entries: day.entries, selected: selected, focusRequest: selection.request) { id in
+                        selection.focus(id)
+                        scrollAfterMap = id
+                    }
+                    .safeAreaInset(edge: .bottom) {
+                        if let selected {
+                            TimelineSegmentRow(entry: selected, selected: false) {
+                                selection.focus(selected.id)
+                            } nameTarget: { _ in }
+                            .padding(8)
+                            .background(.regularMaterial)
+                        }
+                    }
+                    .navigationTitle("当天地图")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("返回时间线") { expandedMap = false }
+                        }
+                        ToolbarItem(placement: .primaryAction) {
+                            Button("显示全天") { selection.id = nil; scrollAfterMap = nil }
+                                .disabled(selected == nil)
+                        }
+                    }
+                }
             }
             .task {
                 if let initialFocus { proxy.scrollTo(initialFocus, anchor: .bottom) }

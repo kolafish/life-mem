@@ -116,7 +116,9 @@ final class ReviewUITests: XCTestCase {
         marker.tap()
         let reset = app.buttons["显示全天"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["编辑地名"].isHittable)
+        XCTAssertTrue(app.navigationBars["当天地图"].waitForExistence(timeout: 5))
+        app.buttons["返回时间线"].tap()
+        XCTAssertTrue(app.buttons["编辑地名"].waitForExistence(timeout: 5))
         let screen = XCTAttachment(screenshot: app.screenshot())
         screen.name = "Focused stay on iPhone SE"
         screen.lifetime = .keepAlways
