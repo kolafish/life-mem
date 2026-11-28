@@ -108,6 +108,32 @@ struct RouteChecks {
         try await checkMainlandPlaceLookup(in: root)
         await checkSharedPlaceCancellation(in: root)
         try await checkPlacePrefetch(in: root)
+        let protected = insertRoute(context: context, start: start, samples: [(0, 0, .walking, true), (30, 0.0003, .walking, false)])
+        try context.save()
+        let key = RouteReview(routes: [protected], calendar: .current).days[0].entries[0].memoryKey!
+        _ = protected.memories?.count
+        do {
+            try key.update(in: container) { memory, _ in
+                memory.draft = "unwritten"
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+            preconditionFailure("Expected the injected write failure")
+        } catch let failure as CocoaError { precondition(failure.code == .fileWriteOutOfSpace) }
+        try key.update(in: container) { memory, _ in memory.draft = "retried" }
+        context.insert(RecordedRoute(startedAt: start))
+        try context.save()
+        let fresh = ModelContext(container)
+        let retainedOwner = try fresh.fetch(FetchDescriptor<RecordedRoute>()).first { $0.id == protected.id }
+        let retainedNote = try key.memory(in: fresh)
+        precondition(retainedOwner?.points.count == 2 && retainedNote.draft == "retried")
+        let originalPointIDs = Set(protected.points.map(\.persistentModelID))
+        try protected.deleteWithMemories(in: context)
+        try context.save()
+        let afterRemoval = ModelContext(container)
+        let keyValue = key.value
+        let orphanCount = try afterRemoval.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == keyValue }))
+        let pointsAfterRemoval = try afterRemoval.fetch(FetchDescriptor<RoutePoint>())
+        precondition(orphanCount == 0 && pointsAfterRemoval.allSatisfy { !originalPointIDs.contains($0.persistentModelID) })
         print("Passed map projection, sampling, persistence, deletion, daily review, visit grouping, and place name checks.")
     }
 
@@ -681,6 +707,25 @@ struct RouteChecks {
         let overnightReview = RouteReview(routes: repeatedOvernight + [midnightDeparture, midnightArrival], calendar: calendar)
         let departureDays = RouteReview(routes: [midnightDeparture], calendar: calendar).days
         precondition(departureDays.map(\.movingDuration) == [30, 10])
+        let keys = departureDays.compactMap { $0.entries.first { $0.kind == .trip }?.memoryKey }
+        precondition(keys.count == 2 && keys[0] == keys[1])
+        let memory = try keys[0].memory(in: context)
+        memory.text = "Synthetic overnight trip"
+        try context.save()
+        let rebuiltKey = RouteReview(routes: [midnightDeparture], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
+        let reopened = try rebuiltKey.memory(in: context)
+        precondition(reopened.persistentModelID == memory.persistentModelID)
+        let isolatedRoute = insertRoute(context: context, start: midnight, samples: [(0, 0, .walking, true), (20, 0.0002, .walking, false)])
+        try context.save()
+        let isolatedKey = RouteReview(routes: [isolatedRoute], calendar: calendar).days[0].entries.first { $0.kind == .trip }!.memoryKey!
+        let other = try isolatedKey.memory(in: context)
+        precondition(other.text.isEmpty)
+        try context.save()
+        context.delete(isolatedRoute)
+        try context.save()
+        let removedKey = isolatedKey.value
+        let count = try context.fetchCount(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == removedKey }))
+        precondition(count == 0)
         precondition(departureDays[0].moves[0].coordinates.first?.longitude == departureDays[1].moves[0].coordinates.last?.longitude)
         let arrivalDays = RouteReview(routes: [midnightArrival], calendar: calendar).days
         precondition(arrivalDays.map(\.movingDuration) == [10, 40])
@@ -1471,6 +1516,14 @@ struct RouteChecks {
         }
         precondition(joined.days.flatMap(\.stays).map(\.duration) == [1_920])
         precondition(joinedIndex.days.flatMap(\.stays).map(\.duration) == [1_920])
+        let observedEntry = RouteReview(routes: [arriving], calendar: calendar).days.flatMap(\.entries).first { $0.kind == .visit }!
+        try VisitCorrection.save(observedEntry.stay!, name: "Separate visit", in: context)
+        let observedKey = observedEntry.memoryKey!
+        try observedKey.update(in: container) { memory, _ in memory.text = "Window seat" }
+        try VisitCorrection.save(observedEntry.stay!, name: nil, in: context)
+        let retained = RouteReview(routes: [leaving, arriving], calendar: calendar)
+        precondition(retained.days.flatMap(\.entries).contains { $0.memoryKey == observedKey })
+        precondition(retained.places.flatMap(\.visits).contains { $0.id == observedEntry.stay?.visitID })
         try VisitCorrection.save(joined.days[0].stays[0], name: nil, ignore: true, in: context)
         let ignored = RouteReview(routes: [leaving, arriving], calendar: calendar)
         precondition(ignored.days.flatMap(\.stays).map(\.duration) == [720])
@@ -1706,6 +1759,42 @@ struct RouteChecks {
             precondition(review.journeys.map(\.mode) == expectedModes && indexed.journeys.map(\.mode) == expectedModes)
             precondition(review.days.flatMap(\.entries).filter { $0.kind == .trip }.count == expectedModes.count)
         }
+        let beforeMidnight = Calendar.current.startOfDay(for: start).timeIntervalSince(start)
+        let a = oldRoute(beforeMidnight - 400, [(0, 0, .automotive, true), (30, 0.003, .automotive, false)])
+        let b = oldRoute(beforeMidnight - 15, [(0, 0.003, .automotive, true), (30, 0.006, .automotive, false)], after: a)
+        try context.save()
+        let joined = RouteReview(routes: [a, b], calendar: .current)
+        let joinedKeys = joined.days.flatMap(\.entries).filter { $0.kind == .trip }.compactMap(\.memoryKey)
+        precondition(joined.journeys.count == 1 && joinedKeys.count == 2 && Set(joinedKeys).count == 1)
+
+        let todayOnly = RouteReviewCache().day(routes: [b, a], containing: Calendar.current.startOfDay(for: start), calendar: .current)
+        precondition(todayOnly.days.first?.entries.first?.memoryKey == joinedKeys.first)
+
+        let visit = insertRoute(context: context, start: start, samples: stop(start: 0, longitude: 0.2))
+        let visitDay = RouteReviewCache().day(routes: [visit, b, a], containing: start, calendar: .current).days.first!
+        precondition(visitDay.entries.contains { $0.kind == .visit })
+        precondition(visitDay.entries.first { $0.kind == .trip }?.memoryKey == joinedKeys.first)
+        let raw = RouteReviewCache().detail(for: b, among: [visit, b, a], calendar: .current)
+        precondition(raw.days.flatMap(\.entries).filter { $0.kind == .trip }.allSatisfy { $0.memoryKey == joinedKeys.first })
+
+        let changing = insertRoute(context: context, start: start, samples: [(0, 0, .unknown, true), (30, 0.0003, .unknown, false)])
+        try context.save()
+        let before = RouteReview(routes: [changing], calendar: .current).days[0].entries[0]
+        precondition(before.kind == .trip)
+        let memory = try before.memoryKey!.memory(in: context)
+        memory.text = "Original note"
+        memory.draft = "Original draft"
+        for seconds in stride(from: 60, through: 600, by: 30) {
+            context.insert(RoutePoint(location: location(longitude: 0.0003, at: start.addingTimeInterval(Double(seconds))),
+                                      mode: .unknown, startsNewSegment: false, route: changing))
+            changing.pointCount += 1
+        }
+        try context.save()
+        let after = RouteReview(routes: [changing], calendar: .current).days[0].entries[0]
+        precondition(after.kind == .visit)
+        let restored = try after.memoryKey!.memory(in: context)
+        precondition(restored.text == memory.text && restored.draft == memory.draft)
+
         let walking: [Sample] = [(0, 0, .walking, true), (30, 0.00035, .walking, false), (60, 0.0007, .walking, false)]
         let isolated = oldRoute(0, walking + stop(start: 90, longitude: 0.0007) + [(1_000, 0.04, .automotive, true)])
         let next = oldRoute(2_000, [(0, 0.04, .automotive, true), (30, 0.042, .automotive, false)], after: isolated)

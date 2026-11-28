@@ -8,6 +8,7 @@ struct TimelineSegmentRow: View {
     @State private var draftName = ""
     let entry: RouteReviewEntry
     let selected: Bool
+    var showMemoryActions = false
     let select: () -> Void
     let nameTarget: (PlaceNamingTarget) -> Void
 
@@ -46,6 +47,9 @@ struct TimelineSegmentRow: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("timeline-entry")
             .accessibilityAddTraits(selected ? .isSelected : [])
+            if let key = entry.memoryKey {
+                EntryMemoryView(key: key, title: title(for: entry), time: clockRange(entry.startedAt, entry.endedAt), selected: selected || showMemoryActions)
+            }
             if selected {
                 if moves.count > 1 {
                     DisclosureGroup("移动片段") {

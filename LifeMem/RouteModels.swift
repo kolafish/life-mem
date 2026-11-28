@@ -21,6 +21,11 @@ final class RecordedRoute {
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.route)
     var points: [RoutePoint]
 
+    @Relationship(deleteRule: .cascade, inverse: \RouteMemory.owner)
+    var memories: [RouteMemory]?
+    @Relationship(deleteRule: .cascade, inverse: \RouteMemory.previous)
+    var arrivalMemories: [RouteMemory]?
+
     init(startedAt: Date) {
         id = UUID()
         self.startedAt = startedAt
@@ -29,6 +34,28 @@ final class RecordedRoute {
         distanceMeters = 0
         points = []
     }
+
+    // A relationship already faulted in the recorder may omit notes saved by a different context on iOS 17.
+    @MainActor func deleteWithMemories(in context: ModelContext) throws {
+        let routeID = id
+        let descriptor = FetchDescriptor<RouteMemory>(predicate: #Predicate {
+            $0.owner?.id == routeID || $0.previous?.id == routeID
+        })
+        for memory in try context.fetch(descriptor) { context.delete(memory) }
+        let points = FetchDescriptor<RoutePoint>(predicate: #Predicate { $0.route?.id == routeID })
+        for point in try context.fetch(points) { context.delete(point) }
+        context.delete(self)
+    }
+
+    func annotatedObservations() -> Set<String> {
+        guard let container = modelContext?.container else { return [] }
+        let reader = ModelContext(container)
+        let routeID = id
+        let descriptor = FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.owner?.id == routeID })
+        let records = (try? reader.fetch(descriptor)) ?? memories ?? []
+        return Set(records.filter(\.isAnnotated).map(\.key))
+    }
+
 }
 
 @Model
@@ -102,5 +129,69 @@ enum VisitCorrection {
         }
         route.visitRevision = UUID()
         do { try context.save() } catch { context.rollback(); throw error }
+    }
+}
+
+/// Identifies the original observation, even when midnight splits its presentation.
+struct RouteMemoryKey: Hashable {
+    let owner: UUID
+    let value: String
+    var previous: UUID?
+
+    init(owner: UUID, start: Date) {
+        self.owner = owner
+        value = "\(owner.uuidString)/observation/\(start.timeIntervalSinceReferenceDate.bitPattern)"
+    }
+
+    init(arrival: UUID, departure: UUID) {
+        owner = departure
+        previous = arrival
+        value = "\(arrival.uuidString)/arrival/\(departure.uuidString)"
+    }
+
+    @MainActor func update(in container: ModelContainer, _ edit: (RouteMemory, ModelContext) throws -> Void) throws {
+        // An unsuccessful insert must never roll back the recorder's context.
+        let writer = ModelContext(container)
+        writer.autosaveEnabled = false
+        let memory = try memory(in: writer)
+        let wasAnnotated = memory.isAnnotated
+        try edit(memory, writer)
+        if wasAnnotated != memory.isAnnotated { memory.owner?.visitRevision = UUID() }
+        try writer.save()
+    }
+
+    @MainActor func memory(in context: ModelContext) throws -> RouteMemory {
+        let value = value
+        if let existing = try context.fetch(FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.key == value })).first {
+            return existing
+        }
+        func route(_ id: UUID) throws -> RecordedRoute {
+            guard let result = try context.fetch(FetchDescriptor<RecordedRoute>(predicate: #Predicate { $0.id == id })).first
+            else { throw VisitCorrection.Failure.sourceUnavailable }
+            return result
+        }
+        let owner = try route(self.owner)
+        let previous = try previous.map(route)
+        let memory = RouteMemory(key: value, owner: owner, previous: previous)
+        context.insert(memory)
+        return memory
+    }
+}
+
+@Model
+final class RouteMemory {
+    @Attribute(.unique) var key: String
+    var text: String
+    var draft: String?
+    var owner: RecordedRoute?
+    var previous: RecordedRoute?
+
+    var isAnnotated: Bool { !text.isEmpty || draft != nil }
+
+    init(key: String, owner: RecordedRoute, previous: RecordedRoute?) {
+        self.key = key
+        self.owner = owner
+        self.previous = previous
+        text = ""
     }
 }

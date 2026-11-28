@@ -51,6 +51,52 @@ final class RouteReviewCache {
         return result
     }
 
+    func day(routes: [RecordedRoute], containing date: Date, calendar: Calendar) -> RouteReview {
+        let midnight = calendar.startOfDay(for: date)
+        let end = calendar.dateInterval(of: .day, for: midnight)?.end ?? midnight
+        let future = routes.prefix { $0.startedAt >= end }
+        let earlier = routes.dropFirst(future.count)
+        let sameDay = earlier.prefix { $0.startedAt >= midnight }
+        let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
+        return review(routes: includingPredecessors(of: Array(subset), in: routes, calendar: calendar), calendar: calendar)
+    }
+
+    func detail(for route: RecordedRoute, among routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
+        let source = RouteReview.contribution(for: route, calendar: calendar)
+        guard route.previousAutomaticRouteID != nil else {
+            return RouteReview(contributions: [source], calendar: calendar)
+        }
+        let related = includingPredecessors(of: [route], in: routes, calendar: calendar)
+        let context = related.map { $0.id == route.id ? source : RouteReview.contribution(for: $0, calendar: calendar) }
+        return RouteReview(contributions: [source], calendar: calendar, keyContext: context)
+    }
+
+    private func includingPredecessors(of subset: [RecordedRoute], in routes: [RecordedRoute], calendar: Calendar) -> [RecordedRoute] {
+        var included = subset
+        let known = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
+        var ids = Set(included.map(\.id))
+        selectCalendar(calendar)
+        func boundary(_ route: RecordedRoute) -> AutomaticVisitBoundary? {
+            let version = RouteReviewRevision.RouteVersion(id: route.id, pointCount: route.pointCount, visitRevision: route.visitRevision,
+                                                         endedAtRest: route.endedAtRest, isAutomatic: route.isAutomatic)
+            if let existing = contributions[version] { return existing.boundary }
+            let result = RouteReview.contribution(for: route, calendar: calendar)
+            contributions[version] = result
+            return result.boundary
+        }
+        var index = included.startIndex
+        while index < included.endIndex {
+            let next = included[index]
+            index += 1
+            guard let id = next.previousAutomaticRouteID, !ids.contains(id), let previous = known[id],
+                  next.arrivalDecision != "confirmed", previous.endedAtRest == true,
+                  let head = boundary(next), let tail = boundary(previous), head.continuesDrive(from: tail) else { continue }
+            ids.insert(id)
+            included.append(previous)
+        }
+        return included
+    }
+
     func summaries(
         for routes: [RecordedRoute],
         revision: RouteReviewRevision,
@@ -115,11 +161,20 @@ struct RouteReview {
         self.init(contributions: routes.map { Self.contribution(for: $0, calendar: calendar) }, calendar: calendar)
     }
 
-    fileprivate init(contributions: [Contribution], calendar: Calendar) {
+    fileprivate init(contributions: [Contribution], calendar: Calendar, keyContext: [Contribution]? = nil) {
         var entriesByDay: [Date: [(UUID?, RouteReviewEntry)]] = [:]
         let resolved = ResolvedVisitGaps(contributions.compactMap { item in
             item.boundary.map { ($0, item.visits) }
         }, calendar: calendar)
+        // Link the source trip keys before projecting joined drives into individual days.
+        let keyResolver = keyContext.map { sources in
+            ResolvedVisitGaps(sources.compactMap { item in item.boundary.map { ($0, item.visits) } }, calendar: calendar)
+        } ?? resolved
+        let routes = (keyContext ?? contributions).compactMap { item -> (UUID, [RouteReviewEntry])? in
+            guard let id = item.boundary?.routeID else { return nil }
+            return (id, item.entriesByDay.values.flatMap { $0 }.filter { $0.kind == .trip })
+        }
+        let sharedKeys = keyResolver.sharedTripKeys(routes)
         let inferred = resolved.gaps
         let edges = ConfirmedVisitEdges(visits: inferred)
         for contribution in contributions {
@@ -127,6 +182,7 @@ struct RouteReview {
                 entriesByDay[date, default: []] += entries.compactMap { entry in
                     if let stay = entry.stay, resolved.incorporated.contains(stay.visitID) { return nil }
                     var entry = entry
+                    if let key = entry.memoryKey, let shared = sharedKeys[key] { entry.memoryKey = shared }
                     if let ends = entry.endpoints {
                         entry.endpoints = edges.names(for: contribution.boundary, endpoints: ends,
                                                       start: entry.startedAt, end: entry.endedAt)
@@ -137,7 +193,10 @@ struct RouteReview {
         }
         for visit in inferred {
             for (day, stay) in visit.dailyInferredStays(calendar: calendar) {
-                entriesByDay[day, default: []].append((nil, .init(kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
+                let key = visit.sourceDepartureID.flatMap { departure in
+                    visit.sourceArrivalID.map { RouteMemoryKey(arrival: $0, departure: departure) }
+                }
+                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -145,7 +204,7 @@ struct RouteReview {
                 date: date,
                 entries: resolved.joinDriveLegs(entriesByDay[date, default: []], start: \.startedAt) { first, next in
                     guard let from = first.endpoints, let to = next.endpoints else { return nil }
-                    return .init(kind: .trip, followsGap: first.followsGap, segments: first.segments + next.segments,
+                    return .init(memoryKey: first.memoryKey, kind: .trip, followsGap: first.followsGap, segments: first.segments + next.segments,
                                  endpoints: from.continuing(to: to), stay: nil)
                 }
             )
@@ -162,6 +221,7 @@ struct RouteReview {
 
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
         var contribution = Contribution()
+        lazy var annotated = route.annotatedObservations()
         let points = route.points
         let edits = Dictionary(uniqueKeysWithValues: points.compactMap { point in
             point.visitName.map { (point.persistentModelID, $0) }
@@ -188,6 +248,7 @@ struct RouteReview {
                 if let visit = slice.visitCoordinate {
                     var observation = RouteVisit(id: first.id, date: firstDay, startedAt: first.timestamp, endedAt: last.timestamp, coordinate: visit)
                     observation.visitName = edits[first.id]
+                    observation.hasMemory = annotated.contains(RouteMemoryKey(owner: route.id, start: first.timestamp).value)
                     contribution.visits.append(observation)
                     let pointsByDay = Dictionary(grouping: slice.points) { calendar.startOfDay(for: $0.timestamp) }
                     for (day, points) in pointsByDay {
@@ -197,6 +258,7 @@ struct RouteReview {
                                              startedAt: max(day, first.timestamp), endedAt: min(dayEnd, last.timestamp))
                         stay.visitName = observation.visitName
                         contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
+                            memoryKey: .init(owner: route.id, start: first.timestamp),
                             kind: .visit, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                             segments: segments, endpoints: nil, stay: stay
                         ))
@@ -228,6 +290,7 @@ struct RouteReview {
                     endpoints?.startName = day == departureDay ? startName : nil
                     endpoints?.endName = day == arrivalDay ? endName : nil
                     contribution.entriesByDay[day, default: []].append(RouteReviewEntry(
+                        memoryKey: hasMovement ? .init(owner: route.id, start: first.timestamp) : nil,
                         kind: hasMovement ? .trip : .fragment, followsGap: index > 0 && sliceIndex == 0 && day == firstDay,
                         segments: segments, endpoints: endpoints, stay: nil
                     ))
@@ -315,6 +378,13 @@ struct AutomaticVisitBoundary: Codable, Sendable {
     var decision: String?
     var name: String?
 
+    func continuesDrive(from previous: Self) -> Bool {
+        self.previous == previous.routeID && session == previous.session && previous.endedAtRest &&
+            previous.endsDriving && startsDriving && !previous.endsWithVisit && !startsWithVisit &&
+            decision != "confirmed" && (0...ArrivalMotion.maximumResumption).contains(start.timeIntervalSince(previous.end)) &&
+            previous.destination.coordinate.location.distance(from: origin.coordinate.location) <= RouteReview.placeRadius
+    }
+
     static func candidates(in sources: [UUID: Self], continuing: [UUID: UUID], calendar: Calendar) -> [RouteVisit] {
         return sources.values.compactMap { departure in
             guard continuing[departure.routeID] == nil, departure.decision != "ignored", let previous = departure.previous, let arrival = sources[previous],
@@ -345,12 +415,7 @@ struct ResolvedVisitGaps {
         let byRoute = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.1) })
         let sources = Dictionary(uniqueKeysWithValues: routes.map { ($0.0.routeID, $0.0) })
         continuing = Dictionary(uniqueKeysWithValues: sources.values.compactMap { next -> (UUID, UUID)? in
-            guard let id = next.previous, let previous = sources[id], next.session == previous.session,
-                  previous.endedAtRest, previous.endsDriving, next.startsDriving,
-                  !previous.endsWithVisit, !next.startsWithVisit, next.decision != "confirmed",
-                  (0...ArrivalMotion.maximumResumption).contains(next.start.timeIntervalSince(previous.end)),
-                  previous.destination.coordinate.location.distance(from: next.origin.coordinate.location) <= RouteReview.placeRadius
-            else { return nil }
+            guard let id = next.previous, let previous = sources[id], next.continuesDrive(from: previous) else { return nil }
             return (next.routeID, id)
         })
         let candidates = AutomaticVisitBoundary.candidates(in: sources, continuing: continuing, calendar: calendar)
@@ -361,7 +426,7 @@ struct ResolvedVisitGaps {
             var start = candidate.startedAt
             var end = candidate.endedAt
             // Independently named observations retain their own edit owner.
-            for edge in [before, after].compactMap({ $0 }) where edge.visitName == nil {
+            for edge in [before, after].compactMap({ $0 }) where edge.visitName == nil && edge.hasMemory != true {
                 guard edge.coordinate.location.distance(from: candidate.coordinate.location) <= RouteReview.placeRadius,
                       edge.endedAt == candidate.startedAt || edge.startedAt == candidate.endedAt,
                       incorporated.insert(edge.id).inserted else { continue }
@@ -376,6 +441,28 @@ struct ResolvedVisitGaps {
             visit.sourceDepartureID = candidate.sourceDepartureID
             gaps.append(visit)
         }
+    }
+
+    func sharedTripKeys(_ routes: [(UUID, [RouteReviewEntry])]) -> [RouteMemoryKey: RouteMemoryKey] {
+        guard !continuing.isEmpty else { return [:] }
+        let trips = Dictionary(uniqueKeysWithValues: routes)
+        var links: [RouteMemoryKey: RouteMemoryKey] = [:]
+        for (next, previous) in continuing {
+            guard let tail = trips[previous]?.max(by: { $0.endedAt < $1.endedAt })?.memoryKey,
+                  let head = trips[next]?.min(by: { $0.startedAt < $1.startedAt })?.memoryKey else { continue }
+            links[head] = tail
+        }
+        var resolved: [RouteMemoryKey: RouteMemoryKey] = [:]
+        for key in links.keys where resolved[key] == nil {
+            var path = Set<RouteMemoryKey>()
+            var first = key
+            while let previous = links[first], path.insert(first).inserted {
+                if let known = resolved[previous] { first = known; break }
+                first = previous
+            }
+            for part in path { resolved[part] = first }
+        }
+        return resolved
     }
 
     /// Join only explicitly linked neighbours, keeping every recorded geometry break.

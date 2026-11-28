@@ -90,6 +90,7 @@ private struct RootView: View {
 
     private struct Request: Equatable {
         let tab: Tab
+        let day: Date
         let revision: RouteReviewRevision
     }
 
@@ -114,14 +115,12 @@ private struct RootView: View {
 
     var body: some View {
         let midnight = calendar.startOfDay(for: today)
-        let recent = Array(routes.prefix { $0.startedAt >= midnight })
-        let todayRoutes = recent + Array(routes.dropFirst(recent.count).prefix(1))
-        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
+        let request = Request(tab: selection, day: midnight, revision: RouteReviewRevision(calendar: calendar, routes: routes))
         let prefetchRoutes = recentFinishedRoutesForPrefetch
         let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
             NavigationStack {
-                RecordView(recorder: recorder, day: todayReview?.days.first { $0.date == midnight }, loading: todayReview == nil && !todayRoutes.isEmpty)
+                RecordView(recorder: recorder, day: todayReview?.days.first { $0.date == midnight }, loading: todayReview == nil && !routes.isEmpty)
             }
             .tabItem { Label("今天", systemImage: "sun.max") }
             .tag(Tab.record)
@@ -146,7 +145,7 @@ private struct RootView: View {
         .task(id: request) {
             guard !Task.isCancelled else { return }
             if request.tab == .record {
-                todayReview = todayCache.review(routes: todayRoutes, calendar: request.revision.calendar)
+                todayReview = todayCache.day(routes: routes, containing: midnight, calendar: request.revision.calendar)
             }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)

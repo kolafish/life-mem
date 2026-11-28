@@ -33,6 +33,7 @@ struct RouteReviewEntry: Identifiable {
     var startedAt: Date { stay?.startedAt ?? segments[0].movementStartedAt }
     var endedAt: Date { stay?.endedAt ?? segments[segments.count - 1].endedAt }
 
+    var memoryKey: RouteMemoryKey? = nil
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
@@ -179,6 +180,7 @@ struct RouteVisit: Identifiable, Codable, Sendable {
     var sourceArrivalID: UUID? = nil
     var sourceDepartureID: UUID?
     var isConfirmed = false
+    var hasMemory: Bool?
     let id: PersistentIdentifier
     let date: Date
     let startedAt: Date
