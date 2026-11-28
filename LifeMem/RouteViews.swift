@@ -213,27 +213,17 @@ struct RouteHistoryView: View {
     }
 
     private struct ReviewModePicker: View {
-        @Environment(\.dynamicTypeSize) private var typeSize
         @Binding var selection: BrowseMode
 
         var body: some View {
-            Group {
-                if typeSize.isAccessibilitySize {
-                    picker.pickerStyle(.menu)
-                } else {
-                    picker.pickerStyle(.segmented)
-                }
-            }
-            .padding(.horizontal, 20)
-            .frame(minHeight: 44)
-        }
-
-        private var picker: some View {
             Picker("回顾方式", selection: $selection) {
                 ForEach(BrowseMode.allCases, id: \.self) { mode in
                     Text(mode.rawValue).tag(mode)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20)
+            .frame(minHeight: 44)
         }
     }
 }
@@ -397,7 +387,6 @@ struct RouteDayReviewView: View {
     @Environment(RoutePlaceNames.self) private var placeNames
     @Environment(PlaceResolver.self) private var placeResolver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var selection: Selection
     @State private var namingTarget: PlaceNamingTarget?
     private let initialFocus: RouteReviewEntry.ID?
@@ -460,7 +449,7 @@ struct RouteDayReviewView: View {
                                     proxy.scrollTo(id, anchor: .bottom)
                                 }
                             }
-                            .frame(height: typeSize.isAccessibilitySize ? 145 : 184)
+                            .frame(height: 184)
                             .clipShape(.rect(cornerRadius: 16))
                         }
                         .padding(.bottom, 8)

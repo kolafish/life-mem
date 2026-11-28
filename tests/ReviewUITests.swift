@@ -131,8 +131,8 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    func testEmptyHistoryAtAccessibilitySize() {
-        let app = launch(fixture: "empty", extraArguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    func testEmptyHistory() {
+        let app = launch(fixture: "empty")
         app.tabBars.buttons["回顾"].tap()
         XCTAssertTrue(app.staticTexts["还没有记录"].waitForExistence(timeout: 5))
         app.buttons["回顾选项"].tap()
@@ -352,9 +352,9 @@ final class ReviewUITests: XCTestCase {
         }
     }
 
-    private func launch(fixture: String, extraArguments: [String] = []) -> XCUIApplication {
+    private func launch(fixture: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extraArguments
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launchEnvironment = ["LIFEMEM_UI_TEST_FIXTURE": fixture, "LIFEMEM_UI_TEST_STORAGE_ID": UUID().uuidString]
         app.launch()
         return app
