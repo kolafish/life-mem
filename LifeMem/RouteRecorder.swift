@@ -219,8 +219,8 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         let wasActive = activeRoute?.id == id
         try await summaryIndex.prepareToDelete(routeID: id)
         let wasAutomatic = automaticTrips.route?.id == id
-        context.delete(route)
         do {
+            try route.deleteWithMemories(in: context)
             try context.save()
         } catch {
             context.rollback()

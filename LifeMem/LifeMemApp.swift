@@ -145,7 +145,7 @@ private struct RootView: View {
         .task(id: request) {
             guard !Task.isCancelled else { return }
             if request.tab == .record {
-                todayReview = todayCache.today(routes: routes, since: midnight, calendar: request.revision.calendar)
+                todayReview = todayCache.day(routes: routes, containing: midnight, calendar: request.revision.calendar)
             }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)

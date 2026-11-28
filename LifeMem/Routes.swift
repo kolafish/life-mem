@@ -51,9 +51,28 @@ final class RouteReviewCache {
         return result
     }
 
-    func today(routes: [RecordedRoute], since midnight: Date, calendar: Calendar) -> RouteReview {
-        let recent = routes.prefix { $0.startedAt >= midnight }
-        var included = Array(recent) + Array(routes.dropFirst(recent.count).prefix(1))
+    func day(routes: [RecordedRoute], containing date: Date, calendar: Calendar) -> RouteReview {
+        let midnight = calendar.startOfDay(for: date)
+        let end = calendar.dateInterval(of: .day, for: midnight)?.end ?? midnight
+        let future = routes.prefix { $0.startedAt >= end }
+        let earlier = routes.dropFirst(future.count)
+        let sameDay = earlier.prefix { $0.startedAt >= midnight }
+        let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
+        return review(routes: includingPredecessors(of: Array(subset), in: routes, calendar: calendar), calendar: calendar)
+    }
+
+    func detail(for route: RecordedRoute, among routes: [RecordedRoute], calendar: Calendar) -> RouteReview {
+        let source = RouteReview.contribution(for: route, calendar: calendar)
+        guard route.previousAutomaticRouteID != nil else {
+            return RouteReview(contributions: [source], calendar: calendar)
+        }
+        let related = includingPredecessors(of: [route], in: routes, calendar: calendar)
+        let context = related.map { $0.id == route.id ? source : RouteReview.contribution(for: $0, calendar: calendar) }
+        return RouteReview(contributions: [source], calendar: calendar, keyContext: context)
+    }
+
+    private func includingPredecessors(of subset: [RecordedRoute], in routes: [RecordedRoute], calendar: Calendar) -> [RecordedRoute] {
+        var included = subset
         let known = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
         var ids = Set(included.map(\.id))
         selectCalendar(calendar)
@@ -75,7 +94,7 @@ final class RouteReviewCache {
             ids.insert(id)
             included.append(previous)
         }
-        return review(routes: included, calendar: calendar)
+        return included
     }
 
     func summaries(
@@ -142,17 +161,20 @@ struct RouteReview {
         self.init(contributions: routes.map { Self.contribution(for: $0, calendar: calendar) }, calendar: calendar)
     }
 
-    fileprivate init(contributions: [Contribution], calendar: Calendar) {
+    fileprivate init(contributions: [Contribution], calendar: Calendar, keyContext: [Contribution]? = nil) {
         var entriesByDay: [Date: [(UUID?, RouteReviewEntry)]] = [:]
         let resolved = ResolvedVisitGaps(contributions.compactMap { item in
             item.boundary.map { ($0, item.visits) }
         }, calendar: calendar)
         // Link the source trip keys before projecting joined drives into individual days.
-        let routes = contributions.compactMap { item -> (UUID, [RouteReviewEntry])? in
+        let keyResolver = keyContext.map { sources in
+            ResolvedVisitGaps(sources.compactMap { item in item.boundary.map { ($0, item.visits) } }, calendar: calendar)
+        } ?? resolved
+        let routes = (keyContext ?? contributions).compactMap { item -> (UUID, [RouteReviewEntry])? in
             guard let id = item.boundary?.routeID else { return nil }
             return (id, item.entriesByDay.values.flatMap { $0 }.filter { $0.kind == .trip })
         }
-        let sharedKeys = resolved.sharedTripKeys(routes)
+        let sharedKeys = keyResolver.sharedTripKeys(routes)
         let inferred = resolved.gaps
         let edges = ConfirmedVisitEdges(visits: inferred)
         for contribution in contributions {
@@ -199,7 +221,7 @@ struct RouteReview {
 
     fileprivate static func contribution(for route: RecordedRoute, calendar: Calendar) -> Contribution {
         var contribution = Contribution()
-        let annotated = Set((route.memories ?? []).filter(\.isAnnotated).map(\.key))
+        lazy var annotated = route.annotatedObservations()
         let points = route.points
         let edits = Dictionary(uniqueKeysWithValues: points.compactMap { point in
             point.visitName.map { (point.persistentModelID, $0) }

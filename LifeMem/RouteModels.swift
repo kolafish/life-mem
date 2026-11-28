@@ -34,6 +34,28 @@ final class RecordedRoute {
         distanceMeters = 0
         points = []
     }
+
+    // A relationship already faulted in the recorder may omit notes saved by a different context on iOS 17.
+    @MainActor func deleteWithMemories(in context: ModelContext) throws {
+        let routeID = id
+        let descriptor = FetchDescriptor<RouteMemory>(predicate: #Predicate {
+            $0.owner?.id == routeID || $0.previous?.id == routeID
+        })
+        for memory in try context.fetch(descriptor) { context.delete(memory) }
+        let points = FetchDescriptor<RoutePoint>(predicate: #Predicate { $0.route?.id == routeID })
+        for point in try context.fetch(points) { context.delete(point) }
+        context.delete(self)
+    }
+
+    func annotatedObservations() -> Set<String> {
+        guard let container = modelContext?.container else { return [] }
+        let reader = ModelContext(container)
+        let routeID = id
+        let descriptor = FetchDescriptor<RouteMemory>(predicate: #Predicate { $0.owner?.id == routeID })
+        let records = (try? reader.fetch(descriptor)) ?? memories ?? []
+        return Set(records.filter(\.isAnnotated).map(\.key))
+    }
+
 }
 
 @Model

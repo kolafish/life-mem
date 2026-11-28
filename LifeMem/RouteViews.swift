@@ -322,11 +322,6 @@ struct RecordedVisitDestination: View {
 
     var body: some View {
         let date = calendar.startOfDay(for: visit.startedAt)
-        let end = calendar.dateInterval(of: .day, for: date)?.end ?? date
-        let future = routes.prefix { $0.startedAt >= end }
-        let earlier = routes.dropFirst(future.count)
-        let sameDay = earlier.prefix { $0.startedAt >= date }
-        let subset = Array(future.suffix(1)) + sameDay + earlier.dropFirst(sameDay.count).prefix(1)
         Group {
             if let day, let entry = day.entries.first(where: { $0.stay?.visitID == visit.id }) {
                 RouteDayReviewView(day: day, focus: entry.id, allowsAutomaticLookup: false).environment(\.currentRouteReview, nil)
@@ -335,8 +330,8 @@ struct RecordedVisitDestination: View {
                 ContentUnavailableView("这次到访已更新", systemImage: "calendar")
             } else { ProgressView() }
         }
-        .task(id: RouteReviewRevision(calendar: calendar, routes: Array(subset))) {
-            day = cache.review(routes: Array(subset), calendar: calendar).days.first { $0.date == date }
+        .task(id: RouteReviewRevision(calendar: calendar, routes: routes)) {
+            day = cache.day(routes: routes, containing: date, calendar: calendar).days.first { $0.date == date }
             loaded = true
         }
     }
@@ -526,10 +521,12 @@ struct RouteDetailView: View {
     let route: RecordedRoute
 
     @Environment(\.calendar) private var calendar
+    @Query(sort: \RecordedRoute.startedAt, order: .reverse) private var routes: [RecordedRoute]
+    @State private var cache = RouteReviewCache()
     @State private var selectedDate: Date?
 
     var body: some View {
-        let days = RouteReview(routes: [route], calendar: calendar).days
+        let days = cache.detail(for: route, among: routes, calendar: calendar).days
         if let day = days.first(where: { $0.date == selectedDate }) ?? days.first {
             RouteDayReviewView(day: day)
                 .environment(\.currentRouteReview, nil)
