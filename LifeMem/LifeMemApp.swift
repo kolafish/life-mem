@@ -114,7 +114,7 @@ private struct RootView: View {
         let midnight = calendar.startOfDay(for: today)
         let recent = Array(routes.prefix { $0.startedAt >= midnight })
         let todayRoutes = recent + Array(routes.dropFirst(recent.count).prefix(1))
-        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: selection == .record ? todayRoutes : routes))
+        let request = Request(tab: selection, revision: RouteReviewRevision(calendar: calendar, routes: routes))
         let prefetchRoutes = recentFinishedRoutesForPrefetch
         let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
@@ -136,6 +136,7 @@ private struct RootView: View {
             .tabItem { Label("分析", systemImage: "chart.bar.xaxis") }
             .tag(Tab.analytics)
         }
+        .environment(\.visitRecall, summary?.recall ?? VisitRecallIndex())
         .environment(\.currentRouteReview, selection == .record ? todayReview : review)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in today = .now }
         .onChange(of: scenePhase) { if scenePhase == .active { today = .now } }
@@ -144,7 +145,6 @@ private struct RootView: View {
             guard !Task.isCancelled else { return }
             if request.tab == .record {
                 todayReview = todayCache.review(routes: todayRoutes, calendar: request.revision.calendar)
-                return
             }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)

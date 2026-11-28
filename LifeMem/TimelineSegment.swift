@@ -209,3 +209,26 @@ struct RoutePlace: Identifiable, Sendable {
         return places.sorted { $0.mostRecentVisit.startedAt > $1.mostRecentVisit.startedAt }
     }
 }
+
+struct VisitRecallIndex: Sendable {
+    struct Memory: Sendable {
+        let visit: RouteVisit
+        let previous: RouteVisit?
+    }
+
+    private let byVisit: [RouteVisit.ID: Memory]
+
+    init(places: [RoutePlace] = []) {
+        var indexed: [RouteVisit.ID: Memory] = [:]
+        for place in places {
+            var previous: RouteVisit?
+            for visit in place.visits {
+                indexed[visit.id] = Memory(visit: visit, previous: previous)
+                previous = visit
+            }
+        }
+        byVisit = indexed
+    }
+
+    subscript(id: RouteVisit.ID) -> Memory? { byVisit[id] }
+}

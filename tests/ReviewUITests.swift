@@ -40,6 +40,20 @@ final class ReviewUITests: XCTestCase {
         #endif
     }
 
+    func testSearchPlaceAndRecallVisit() {
+        let app = launch(fixture: "day")
+        app.tabBars.buttons["回顾"].tap()
+        app.buttons["地点"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("测试办公室")
+        let office = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "测试办公室")).firstMatch
+        XCTAssertTrue(office.waitForExistence(timeout: 5))
+        office.tap()
+        XCTAssertTrue(app.staticTexts["到访记录"].waitForExistence(timeout: 5))
+    }
+
     func testTodayShowsStopsAndOpensSelectedEntry() {
         let app = launch(fixture: "day")
         let title = app.staticTexts["today-title"]

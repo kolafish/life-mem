@@ -1275,6 +1275,13 @@ struct RouteChecks {
         precondition(changed.journeys.first?.endpoints.startName == "隔壁咖啡店")
         let behavior = RouteBehavior(review: changed, range: midnight...midnight, calendar: calendar) { _ in .home }
         precondition(behavior.routine.isEmpty)
+        var firstVisit = confirmed.places[0].visits[0]
+        firstVisit.visitName = "书店"
+        var laterVisit = edited.places[0].visits[0]
+        laterVisit.visitName = "书店"
+        let grouped = RoutePlace.group([laterVisit, firstVisit], within: 100)
+        let recall = VisitRecallIndex(places: grouped)
+        precondition(recall[firstVisit.id]?.previous == nil && recall[laterVisit.id]?.previous?.id == firstVisit.id)
         let all = RoutePlace.group(edited.places[0].visits + confirmed.places[0].visits, within: 100)
         precondition(all.count == 2)
     }

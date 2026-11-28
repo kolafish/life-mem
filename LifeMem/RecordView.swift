@@ -90,6 +90,7 @@ struct RecordView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .accessibilityIdentifier("today-entry")
+                            if let stay = entry.stay { VisitMemoryLink(stay: stay) }
                         }
                     }
                 } else if loading {
