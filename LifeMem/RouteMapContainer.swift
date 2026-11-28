@@ -61,7 +61,7 @@ struct RouteMapContainer: View {
     }
 
     private var stayMarkers: [StayMarkers] {
-        entries.compactMap(\.stay).reduce(into: []) { groups, stay in
+        entries.compactMap(\.stay).filter { $0.isCandidate != true }.reduce(into: []) { groups, stay in
             let location = MKMapPoint(stay.coordinate)
             if let index = groups.firstIndex(where: { MKMapPoint($0.coordinate).distance(to: location) < 25 }) {
                 groups[index].stays.append(stay)

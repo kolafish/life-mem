@@ -6,6 +6,7 @@ import SwiftData
 struct RouteChecks {
     @MainActor
     static func main() async throws {
+        try checkVisitCandidates()
         try checkAutomaticTrips()
         checkMapProjection()
         let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3_600)
@@ -1193,6 +1194,44 @@ struct RouteChecks {
     }
 
     @MainActor
+    private static func checkVisitCandidates() throws {
+        let container = try ModelContainer(for: RecordedRoute.self, RoutePoint.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        let calendar = Calendar.current
+        let midnight = calendar.startOfDay(for: Date.now)
+        func route(_ start: Date, _ from: Double, _ to: Double) -> RecordedRoute {
+            let route = RecordedRoute(startedAt: start)
+            route.isAutomatic = true
+            route.automaticSessionStart = midnight.addingTimeInterval(-3600)
+            context.insert(route)
+            for (index, x) in [from, to].enumerated() {
+                let fix = location(longitude: x, at: start.addingTimeInterval(Double(index * 60)))
+                context.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: index == 0, route: route))
+                route.pointCount += 1
+            }
+            return route
+        }
+        let a = route(midnight.addingTimeInterval(-1800), 0, 0.0008)
+        let b = route(midnight.addingTimeInterval(1800), 0.0008, 0)
+        a.endedAtRest = true
+        b.previousAutomaticRouteID = a.id
+        try context.save()
+        func candidates() -> [StayEvent] {
+            RouteReview(routes: [b, a], calendar: calendar).days.flatMap(\.entries)
+                .compactMap(\.stay).filter { $0.isCandidate == true }
+        }
+        let projected = candidates()
+        precondition(projected.count == 2 && Set(projected.map(\.visitID)).count == 1)
+        precondition(RouteReview(routes: [b, a], calendar: calendar).places.isEmpty)
+        b.automaticSessionStart = midnight
+        precondition(candidates().isEmpty)
+        b.automaticSessionStart = a.automaticSessionStart
+        b.previousAutomaticRouteID = nil
+        precondition(candidates().isEmpty)
+    }
+
+    @MainActor
     private static func checkAutomaticTrips() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: RecordedRoute.self, RoutePoint.self, configurations: config)
@@ -1226,6 +1265,7 @@ struct RouteChecks {
         let second = trips.route!
         precondition(first.isFinished && second.id != first.id && second.pointCount == 2)
         trips = AutomaticTrips(context: context)
+        trips.sessionStart = start
         try trips.restore(now: start.addingTimeInterval(755))
         try send(780, 0.0016)
         precondition(trips.route?.id == second.id && second.pointCount == 3)
@@ -1233,6 +1273,16 @@ struct RouteChecks {
         precondition(second.isFinished && trips.route == nil)
         let saved = try context.fetch(FetchDescriptor<RecordedRoute>())
         precondition(saved.count == 2 && !RouteReview(routes: saved, calendar: .current).days.isEmpty)
+        try send(1500, 0.002)
+        try send(1530, 0.0024)
+        let stale = trips.route!
+        try trips.receive(nil, stationary: true, receivedAt: start.addingTimeInterval(6000))
+        precondition(stale.isFinished && stale.endedAtRest != true)
+        try send(7200, 0.0024)
+        try send(7230, 0.0030)
+        let invalid = trips.route!
+        try send(8500, 0.0030, paused: true, accuracy: 500)
+        precondition(invalid.isFinished && invalid.endedAtRest != true)
     }
 
     private static func location(longitude: Double, at timestamp: Date, accuracy: Double = 5) -> CLLocation {

@@ -92,13 +92,14 @@ final class RouteRecorder: NSObject, @preconcurrency CLLocationManagerDelegate {
         automaticNeedsSettings = false
         needsPreciseLocation = locationManager.accuracyAuthorization == .reducedAccuracy
         locationUnavailable = false
+        let enabledAt = preferences.object(forKey: "automaticRecordingSince") as? Date ?? .now
+        automaticTrips.sessionStart = enabledAt
         do { try automaticTrips.restore(now: .now) }
         catch {
             automaticFailure()
             return
         }
         // On a background relaunch the first fix may predate this process.
-        let enabledAt = preferences.object(forKey: "automaticRecordingSince") as? Date ?? .now
         backgroundSession = CLBackgroundActivitySession()
         automaticTask = Task {
             do {

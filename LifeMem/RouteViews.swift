@@ -495,7 +495,7 @@ private struct RouteArchiveView: View {
 
 private extension RouteReviewDay {
     var summary: String {
-        let counts = Dictionary(grouping: entries, by: \.kind).mapValues(\.count)
+        let counts = Dictionary(grouping: entries.filter { $0.stay?.isCandidate != true }, by: \.kind).mapValues(\.count)
         var parts: [String] = []
         if let trips = counts[.trip] { parts.append("\(trips) 趟行程") }
         if let visits = counts[.visit] { parts.append("\(visits) 次停留") }

@@ -8,6 +8,9 @@ final class RecordedRoute {
     var startedAt: Date
     var isAutomatic: Bool?
     var automaticPauseAt: Date?
+    var automaticSessionStart: Date?
+    var previousAutomaticRouteID: UUID?
+    var endedAtRest: Bool?
     var isFinished: Bool
     var pointCount: Int
     var distanceMeters: Double

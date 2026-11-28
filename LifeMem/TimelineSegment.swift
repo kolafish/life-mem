@@ -20,7 +20,7 @@ struct RouteReviewEntry: Identifiable {
         }
     }
 
-    var id: PersistentIdentifier { segments[0].id }
+    var id: PersistentIdentifier { stay?.id ?? segments[0].id }
     var startedAt: Date { stay?.startedAt ?? segments[0].movementStartedAt }
     var endedAt: Date { stay?.endedAt ?? segments[segments.count - 1].endedAt }
 
@@ -50,7 +50,7 @@ struct RouteReviewDay: Identifiable {
     let entries: [RouteReviewEntry]
 
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
-    var stays: [StayEvent] { entries.compactMap(\.stay) }
+    var stays: [StayEvent] { entries.compactMap(\.stay).filter { $0.isCandidate != true } }
     var moves: [MoveEvent] { entries.flatMap(\.moves) }
     var movingDistanceMeters: CLLocationDistance { moves.reduce(0) { $0 + $1.distanceMeters } }
     var movingDuration: TimeInterval { moves.reduce(0) { $0 + $1.duration } }
@@ -73,6 +73,7 @@ enum TimelineSegment: Identifiable {
 
 struct StayEvent: Identifiable, Codable, Sendable {
     let id: PersistentIdentifier
+    var isCandidate: Bool? = nil
     let visitID: PersistentIdentifier
     private let position: StoredCoordinate
     let startedAt: Date

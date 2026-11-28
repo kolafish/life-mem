@@ -11,6 +11,7 @@ final class AutomaticTrips {
 
     private let context: ModelContext
     private(set) var route: RecordedRoute?
+    var sessionStart: Date?
     private var lastFix: CLLocation?
     private var lastMode = TravelMode.unknown
     private var dwellAnchor: CLLocation?
@@ -25,6 +26,7 @@ final class AutomaticTrips {
         var query = FetchDescriptor<RecordedRoute>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
         query.fetchLimit = 1
         guard let saved = try context.fetch(query).first, saved.isAutomatic == true,
+              saved.automaticSessionStart == nil || saved.automaticSessionStart == sessionStart,
               !saved.isFinished || saved.automaticPauseAt.map({ now.timeIntervalSince($0) < Self.shortStop }) == true
         else { return }
         route = saved
@@ -92,11 +94,19 @@ final class AutomaticTrips {
            let lastFix, anchor.distance(from: lastFix) <= 100 {
             trip = recent
         } else {
+            var query = FetchDescriptor<RecordedRoute>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+            query.fetchLimit = 1
+            let previous = try context.fetch(query).first
             trip = RecordedRoute(startedAt: anchor.timestamp)
+            trip.automaticSessionStart = sessionStart
+            if let sessionStart, previous?.automaticSessionStart == sessionStart, previous?.endedAtRest == true {
+                trip.previousAutomaticRouteID = previous?.id
+            }
             trip.isAutomatic = true
             context.insert(trip)
         }
         route = trip
+        trip.endedAtRest = nil
         trip.isFinished = false
         trip.automaticPauseAt = nil
         lastFix = nil
@@ -111,6 +121,10 @@ final class AutomaticTrips {
     private func close(_ route: RecordedRoute, at location: CLLocation?, rejoinAfter pause: Date?) throws {
         if let location { append(location, mode: .stationary, to: route) }
         route.isFinished = true
+        let eventTime = pause ?? location?.timestamp
+        route.endedAtRest = eventTime.flatMap { time in
+            lastFix.map { (0...LocationSampling.maximumGap).contains(time.timeIntervalSince($0.timestamp)) }
+        } == true
         route.automaticPauseAt = pause
         try save()
     }
