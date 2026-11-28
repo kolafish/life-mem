@@ -34,6 +34,7 @@ struct RouteReviewEntry: Identifiable {
     var endedAt: Date { stay?.endedAt ?? segments[segments.count - 1].endedAt }
 
     var memoryKey: RouteMemoryKey? = nil
+    var observedVisits: [RouteVisit] = []
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
@@ -60,22 +61,25 @@ struct RouteReviewDay: Identifiable {
     let entries: [RouteReviewEntry]
 
     func memoryKey(forPhotoAt time: Date, coordinate: CLLocationCoordinate2D?) -> RouteMemoryKey? {
-        var matched: RouteMemoryKey?
+        var candidate: (key: RouteMemoryKey, position: CLLocationCoordinate2D)?
         for entry in entries where entry.startedAt <= time && time <= entry.endedAt {
             guard let key = entry.memoryKey else { continue }
             let position: CLLocationCoordinate2D?
             if let stay = entry.stay {
-                guard stay.isInferred != true && stay.isCandidate != true else { continue }
-                position = stay.coordinate
+                guard stay.isCandidate != true else { continue }
+                if stay.isInferred == true {
+                    position = entry.observedVisits.first { $0.startedAt <= time && time <= $0.endedAt }?.coordinate
+                } else { position = stay.coordinate }
             } else {
                 position = entry.segments.lazy.compactMap { $0.coordinate(at: time) }.first
             }
             guard let position else { continue }
-            if let coordinate, coordinate.location.distance(from: position.location) > 150 { continue }
-            if let matched, matched != key { return nil }
-            matched = key
+            if let candidate, candidate.key != key { return nil }
+            candidate = (key, position)
         }
-        return matched
+        guard let candidate else { return nil }
+        if let coordinate, coordinate.location.distance(from: candidate.position.location) > 150 { return nil }
+        return candidate.key
     }
 
     func title(for entry: RouteReviewEntry, named: (CLLocationCoordinate2D) -> String?) -> String {

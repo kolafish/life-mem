@@ -8,10 +8,12 @@ struct DayLibraryRevision: Equatable {
         let start: Date
         let end: Date
         let segments: Int
+        let observations: [DateInterval]
     }
     let date: Date
     let entries: [Entry]
     let enabled: Bool
+    let assignedIDs: Set<String>
     let active: Bool
     let revision: Int
 }
@@ -28,7 +30,6 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
     private var cachedRevision = -1
     private var cachedAssets: [PHAsset] = []
 
-
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in self?.revision &+= 1 }
     }
@@ -44,14 +45,14 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    func refresh(_ day: RouteReviewDay, enabled: Bool) async {
+    func refresh(_ day: RouteReviewDay, enabled: Bool, assignedIDs: Set<String>) async {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status != authorization {
             cachedDay = nil
             available = [:]; matches = [:]; pending = []
         }
         authorization = status
-        guard enabled, authorization == .authorized || authorization == .limited,
+        guard enabled || !assignedIDs.isEmpty, authorization == .authorized || authorization == .limited,
               let interval = Calendar.current.dateInterval(of: .day, for: day.date) else {
             available = [:]; matches = [:]; pending = []
             observe(false)
@@ -60,7 +61,9 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
         observe(true)
         let version = revision
         let assets: [PHAsset]
-        if cachedDay == interval.start && cachedRevision == version {
+        if !enabled {
+            assets = []
+        } else if cachedDay == interval.start && cachedRevision == version {
             assets = cachedAssets
         } else {
             assets = await Self.fetchAssets(in: interval)
@@ -77,14 +80,23 @@ final class DayPhotoLibrary: NSObject, PHPhotoLibraryChangeObserver {
                 grouped[key, default: []].append(asset)
             } else { others.append(asset) }
         }
-        available = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
+        var visible = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
+        let missing = assignedIDs.subtracting(visible.keys)
+        if !missing.isEmpty {
+            let pinned = await Task.detached {
+                let found = PHAsset.fetchAssets(withLocalIdentifiers: Array(missing), options: nil)
+                return found.objects(at: IndexSet(integersIn: 0..<found.count))
+            }.value
+            guard !Task.isCancelled else { return }
+            for asset in pinned where !asset.isHidden { visible[asset.localIdentifier] = asset }
+        }
+        available = visible
         matches = grouped
         pending = others
     }
 
     private static func fetchAssets(in interval: DateInterval) async -> [PHAsset] {
         await Task.detached {
-
             let options = PHFetchOptions()
             options.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate < %@", interval.start as NSDate, interval.end as NSDate)
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
@@ -222,24 +234,30 @@ struct LibraryImage: View {
             } else {
                 VStack {
                     Image(systemName: unavailable ? "icloud" : "photo")
-                    if fullSize && unavailable { Text("原图在本机不可用，可在系统照片中下载后重试。").font(.footnote) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.secondary)
             }
         }
+        .overlay(alignment: .bottom) {
+            if fullSize && unavailable {
+                Text("原图在本机不可用，可在系统照片中下载后重试。")
+                    .font(.footnote).padding(8).background(.regularMaterial, in: .rect(cornerRadius: 8))
+            }
+        }
         .onAppear { load() }
+        .onChange(of: fullSize) { load(keepPreview: true) }
         .onChange(of: asset) { load() }
         .onDisappear { cancel() }
     }
 
-    private func cancel() {
+    private func cancel(keepPreview: Bool = false) {
         token = UUID()
         if let request { PHImageManager.default().cancelImageRequest(request) }
         request = nil
-        image = nil
+        if !keepPreview { image = nil }
     }
 
-    private func load() {
-        cancel()
+    private func load(keepPreview: Bool = false) {
+        cancel(keepPreview: keepPreview)
         unavailable = false
         let current = token
         let options = PHImageRequestOptions()
@@ -252,6 +270,7 @@ struct LibraryImage: View {
                 guard token == current else { return }
                 if let value { image = value }
                 if info?[PHImageResultIsDegradedKey] as? Bool != true { unavailable = value == nil }
+                else if fullSize && info?[PHImageResultIsInCloudKey] as? Bool == true { unavailable = true }
             }
         }
     }

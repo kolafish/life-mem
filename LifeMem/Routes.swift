@@ -196,7 +196,7 @@ struct RouteReview {
                 let key = visit.sourceDepartureID.flatMap { departure in
                     visit.sourceArrivalID.map { RouteMemoryKey(arrival: $0, departure: departure) }
                 }
-                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
+                entriesByDay[day, default: []].append((nil, .init(memoryKey: visit.isConfirmed ? key : nil, observedVisits: resolved.observedEdges[visit.id] ?? [], kind: .visit, followsGap: false, segments: [], endpoints: nil, stay: stay)))
             }
         }
         days = entriesByDay.keys.sorted(by: >).map { date in
@@ -409,6 +409,7 @@ struct AutomaticVisitBoundary: Codable, Sendable {
 struct ResolvedVisitGaps {
     private let continuing: [UUID: UUID]
     private(set) var incorporated = Set<PersistentIdentifier>()
+    private(set) var observedEdges: [PersistentIdentifier: [RouteVisit]] = [:]
     private(set) var gaps: [RouteVisit] = []
 
     init(_ routes: [(AutomaticVisitBoundary, [RouteVisit])], calendar: Calendar) {
@@ -430,6 +431,7 @@ struct ResolvedVisitGaps {
                 guard edge.coordinate.location.distance(from: candidate.coordinate.location) <= RouteReview.placeRadius,
                       edge.endedAt == candidate.startedAt || edge.startedAt == candidate.endedAt,
                       incorporated.insert(edge.id).inserted else { continue }
+                observedEdges[candidate.id, default: []].append(edge)
                 start = min(start, edge.startedAt)
                 end = max(end, edge.endedAt)
             }

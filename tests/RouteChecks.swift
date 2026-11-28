@@ -225,6 +225,14 @@ struct RouteChecks {
         let overlap = RouteReview(routes: [route, second], calendar: .current).days[0]
         precondition(overlap.memoryKey(forPhotoAt: time, coordinate: nil) == nil)
         precondition(overlap.memoryKey(forPhotoAt: time, coordinate: near) == nil)
+        let distant = insertRoute(context: context, start: start, samples: [(0, 1, .walking, true), (30, 1.001, .walking, false)])
+        try context.save()
+        let ambiguous = RouteReview(routes: [route, distant], calendar: .current).days[0]
+        precondition(ambiguous.memoryKey(forPhotoAt: time, coordinate: near) == nil)
+        let later = insertRoute(context: context, start: start.addingTimeInterval(3600), samples: samples)
+        try context.save()
+        let allDay = RouteReviewCache().review(routes: [route, later], calendar: .current).days[0]
+        precondition(allDay.memoryKey(forPhotoAt: time.addingTimeInterval(3600), coordinate: near)?.owner == later.id)
     }
 
     private static func checkMapProjection() {
@@ -1616,6 +1624,11 @@ struct RouteChecks {
         }
         precondition(joined.days.flatMap(\.stays).map(\.duration) == [1_920])
         precondition(joinedIndex.days.flatMap(\.stays).map(\.duration) == [1_920])
+        let mergedStay = joined.days.flatMap(\.entries).first { $0.stay?.isInferred == true }!
+        let captured = arriving.startedAt.addingTimeInterval(180)
+        precondition(joined.days[0].memoryKey(forPhotoAt: captured, coordinate: mergedStay.stay?.coordinate) == mergedStay.memoryKey)
+        let gap = arriving.startedAt.addingTimeInterval(1200)
+        precondition(joined.days[0].memoryKey(forPhotoAt: gap, coordinate: nil) == nil)
         let observedEntry = RouteReview(routes: [arriving], calendar: calendar).days.flatMap(\.entries).first { $0.kind == .visit }!
         try VisitCorrection.save(observedEntry.stay!, name: "Separate visit", in: context)
         let observedKey = observedEntry.memoryKey!
