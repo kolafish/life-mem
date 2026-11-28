@@ -237,7 +237,7 @@ struct RouteAnalytics: Sendable {
         for stay in summary.stays.sorted(by: { $0.startedAt < $1.startedAt }) where stay.duration > 0 {
             let span = DateInterval(start: stay.startedAt, end: stay.endedAt)
             guard let observed = clip(span, to: elapsed) else { continue }
-            observations.append(Observation(use: RouteTimeUse(category: category(stay.coordinate)), interval: observed))
+            observations.append(Observation(use: RouteTimeUse(category: stay.visitName == nil ? category(stay.coordinate) : nil), interval: observed))
             onStay(stay, observed.duration)
         }
         return observedTime(observations)

@@ -45,7 +45,7 @@ struct DailySummaryCard: View {
 
     private var stayDistribution: some View {
         let durations = day.stays.reduce(into: [PlaceCategory: TimeInterval]()) { result, stay in
-            result[placeNames.category(for: stay.coordinate) ?? .other, default: 0] += stay.duration
+            result[(stay.visitName == nil ? placeNames.category(for: stay.coordinate) : nil) ?? .other, default: 0] += stay.duration
         }
         let categories = PlaceCategory.allCases.filter { (durations[$0] ?? 0) > 0 }
         let total = durations.values.reduce(0, +)

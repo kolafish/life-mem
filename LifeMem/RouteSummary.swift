@@ -7,6 +7,12 @@ struct DailySummary: Codable, Sendable {
 
     var movingDuration: TimeInterval { movement.reduce(0) { $0 + $1.duration } }
 
+    init(date: Date, inferredStay: StayEvent) {
+        self.date = date
+        movement = []
+        stays = [inferredStay]
+    }
+
     init(day: RouteReviewDay) {
         date = day.date
         movement = day.movementIntervals
@@ -24,6 +30,8 @@ struct RouteSummaryRecord: Codable, Sendable {
     let days: [DailySummary]
     let visits: [RouteVisit]
     let journeys: [RouteJourney]
+
+    var boundary: AutomaticVisitBoundary? = nil
 
     fileprivate var hasValidTimes: Bool {
         days.allSatisfy { day in
@@ -46,17 +54,22 @@ struct RouteSummary: Sendable {
         journeys = review.journeys
     }
 
-    init(records: [RouteSummaryRecord]) {
-        let byDate = Dictionary(grouping: records.flatMap(\.days), by: \.date)
+    init(records: [RouteSummaryRecord], calendar: Calendar = .current) {
+        let confirmed = AutomaticVisitBoundary.candidates(in: records.compactMap(\.boundary), calendar: calendar).filter(\.isConfirmed)
+        let extra = confirmed.flatMap { visit in
+            visit.dailyInferredStays(calendar: calendar).map { DailySummary(date: $0.0, inferredStay: $0.1) }
+        }
+        let byDate = Dictionary(grouping: records.flatMap(\.days) + extra, by: \.date)
         days = byDate.keys.sorted(by: >).map { DailySummary(date: $0, combining: byDate[$0, default: []]) }
-        places = RoutePlace.group(records.flatMap(\.visits), within: RouteReview.placeRadius)
-        journeys = records.flatMap(\.journeys)
+        places = RoutePlace.group(records.flatMap(\.visits) + confirmed, within: RouteReview.placeRadius)
+        let edges = ConfirmedVisitEdges(visits: confirmed)
+        journeys = records.flatMap { item in item.journeys.map { edges.applying(to: $0, boundary: item.boundary) } }
     }
 }
 
 actor RouteSummaryIndex {
     // Increment when the stored fields or the segmentation and projection rules change.
-    private static let version = 2
+    private static let version = 3
 
     private struct Index: Codable {
         let version: Int

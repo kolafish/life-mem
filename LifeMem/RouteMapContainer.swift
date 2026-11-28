@@ -63,7 +63,7 @@ struct RouteMapContainer: View {
     private var stayMarkers: [StayMarkers] {
         entries.compactMap(\.stay).filter { $0.isCandidate != true }.reduce(into: []) { groups, stay in
             let location = MKMapPoint(stay.coordinate)
-            if let index = groups.firstIndex(where: { MKMapPoint($0.coordinate).distance(to: location) < 25 }) {
+            if let index = groups.firstIndex(where: { $0.stays.first?.visitName == stay.visitName && MKMapPoint($0.coordinate).distance(to: location) < 25 }) {
                 groups[index].stays.append(stay)
             } else {
                 groups.append(StayMarkers(stays: [stay]))
@@ -72,8 +72,8 @@ struct RouteMapContainer: View {
     }
 
     private func stayMarker(_ group: StayMarkers) -> some View {
-        let category = placeNames.category(for: group.coordinate)
-        let name = placeResolver.label(near: group.coordinate, names: placeNames) ?? "停留地点"
+        let category = group.stays.first?.visitName == nil ? placeNames.category(for: group.coordinate) : nil
+        let name = group.stays.first?.visitName ?? placeResolver.label(near: group.coordinate, names: placeNames) ?? "停留地点"
         let isSelected = group.stays.contains { $0.id == selected?.id }
         let detail = group.stays.count == 1 ? routeDuration(group.stays[0].duration) : "\(group.stays.count) 次停留"
         return Group {
@@ -141,8 +141,8 @@ struct RouteMapContainer: View {
     private func tripMarkers(_ entry: RouteReviewEntry) -> some MapContent {
         let segments = entry.segments.filter { $0.mode != .stationary }
         if let start = segments.first?.firstCoordinate, let end = segments.last?.lastCoordinate {
-            let startName = entry.endpoints.flatMap { placeResolver.label(near: $0.start, names: placeNames) }
-            let endName = entry.endpoints.flatMap { placeResolver.label(near: $0.end, names: placeNames) }
+            let startName = entry.endpoints.flatMap { $0.startName ?? placeResolver.label(near: $0.start, names: placeNames) }
+            let endName = entry.endpoints.flatMap { $0.endName ?? placeResolver.label(near: $0.end, names: placeNames) }
             let mapStart = RouteMapProjection.standard.coordinate(for: start)
             if MKMapPoint(start).distance(to: MKMapPoint(end)) < 15 {
                 Marker(startName ?? endName ?? "起点和终点", systemImage: "flag.checkered", coordinate: mapStart).tint(.indigo)

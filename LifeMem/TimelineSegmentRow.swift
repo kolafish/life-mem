@@ -2,6 +2,10 @@ import CoreLocation
 import SwiftUI
 
 struct TimelineSegmentRow: View {
+    @Environment(\.modelContext) private var context
+    @State private var editVisit = false
+    @State private var saveError = false
+    @State private var draftName = ""
     let entry: RouteReviewEntry
     let selected: Bool
     let select: () -> Void
@@ -11,7 +15,7 @@ struct TimelineSegmentRow: View {
     @Environment(PlaceResolver.self) private var placeResolver
 
     var body: some View {
-        let category = entry.visitCoordinate.flatMap { placeNames.category(for: $0) }
+        let category = entry.stay.flatMap { $0.visitName == nil ? placeNames.category(for: $0.coordinate) : nil }
         let moves = entry.moves
         let color = category?.mapColor ?? (entry.kind == .visit ? .teal : moves.first?.mode.mapColor ?? .secondary)
         return VStack(alignment: .leading, spacing: 0) {
@@ -57,13 +61,39 @@ struct TimelineSegmentRow: View {
                     .font(.subheadline)
                     .padding(.vertical, 6)
                 }
-                namingAction(for: entry)
+                if let stay = entry.stay {
+                    HStack {
+                        if stay.isCandidate == true {
+                            Button("确认到访") { save(stay, name: nil) }
+                            Button("忽略") { save(stay, name: nil, ignore: true) }
+                        }
+                        Button("只改这次地点") {
+                            draftName = stay.visitName ?? ""
+                            editVisit = true
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if entry.stay?.isCandidate != true { namingAction(for: entry) }
             }
         }
+        .alert("只改这次地点", isPresented: $editVisit) {
+            TextField("地点名称", text: $draftName)
+            Button("保存") { if let stay = entry.stay { save(stay, name: draftName) } }
+            Button("取消", role: .cancel) {}
+        } message: { Text("留空会使用附近地点的默认名称。") }
+        .alert("未能保存到访", isPresented: $saveError) {
+            Button("好", role: .cancel) {}
+        } message: { Text("请重新打开当天的记录，检查可用空间后再试。") }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(selected ? Color.indigo.opacity(0.09) : Color(uiColor: .secondarySystemGroupedBackground),
                     in: .rect(cornerRadius: 14))
+    }
+
+    private func save(_ stay: StayEvent, name: String?, ignore: Bool = false) {
+        do { try VisitCorrection.save(stay, name: name, ignore: ignore, in: context) }
+        catch { saveError = true }
     }
 
     @ViewBuilder
@@ -90,13 +120,13 @@ struct TimelineSegmentRow: View {
 
     private func title(for entry: RouteReviewEntry) -> String {
         if let coordinate = entry.visitCoordinate {
-            let name = placeResolver.label(near: coordinate, names: placeNames)
+            let name = entry.stay?.visitName ?? placeResolver.label(near: coordinate, names: placeNames)
             if entry.stay?.isCandidate == true { return name.map { "可能在\($0)附近停留" } ?? "可能的停留 · 待确认" }
             return name ?? "停留地点"
         }
         if let endpoints = entry.endpoints {
-            let start = placeResolver.label(near: endpoints.start, names: placeNames)
-            let end = placeResolver.label(near: endpoints.end, names: placeNames)
+            let start = endpoints.startName ?? placeResolver.label(near: endpoints.start, names: placeNames)
+            let end = endpoints.endName ?? placeResolver.label(near: endpoints.end, names: placeNames)
             if start != nil || end != nil { return "\(start ?? "起点") → \(end ?? "终点")" }
         }
         if let mode = entry.moves.first?.mode, entry.moves.allSatisfy({ $0.mode == mode }) {

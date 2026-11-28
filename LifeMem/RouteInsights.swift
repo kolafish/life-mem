@@ -72,8 +72,8 @@ struct RouteInsights: Sendable {
 
         commute = previous.flatMap { interval in
             compared.compactMap { pattern, samples -> CommuteChange? in
-                let origin = category(pattern.start)
-                let destination = category(pattern.end)
+                let origin = pattern.startName == nil ? category(pattern.start) : nil
+                let destination = pattern.endName == nil ? category(pattern.end) : nil
                 guard (origin == .home && destination == .work) || (origin == .work && destination == .home) else { return nil }
                 let earlier = Self.completedSamples(pattern.samples, departingIn: interval, asOf: now)
                 guard earlier.count >= 2, let fastest = samples.min(by: { $0.duration < $1.duration }) else { return nil }

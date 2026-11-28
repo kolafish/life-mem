@@ -8,6 +8,8 @@ struct RouteReviewEntry: Identifiable {
     enum Kind { case trip, visit, fragment }
 
     struct Endpoints: Codable, Sendable {
+        var startName: String?
+        var endName: String?
         private let origin: StoredCoordinate
         private let destination: StoredCoordinate
 
@@ -27,7 +29,7 @@ struct RouteReviewEntry: Identifiable {
     let kind: Kind
     let followsGap: Bool
     let segments: [RouteActivitySegment]
-    let endpoints: Endpoints?
+    var endpoints: Endpoints?
     let stay: StayEvent?
 
     var visitCoordinate: CLLocationCoordinate2D? { stay?.coordinate }
@@ -73,6 +75,9 @@ enum TimelineSegment: Identifiable {
 
 struct StayEvent: Identifiable, Codable, Sendable {
     let id: PersistentIdentifier
+    var isInferred: Bool? = nil
+    var sourceArrivalID: UUID? = nil
+    var visitName: String? = nil
     var isCandidate: Bool? = nil
     let visitID: PersistentIdentifier
     private let position: StoredCoordinate
@@ -118,15 +123,19 @@ struct RouteJourney: Identifiable, Codable, Sendable {
     }
 
     let id: PersistentIdentifier
-    let endpoints: RouteReviewEntry.Endpoints
+    var endpoints: RouteReviewEntry.Endpoints
     let departedAt: Date
     let duration: TimeInterval
     let mode: TravelMode
-    let departureStay: StayConnection?
-    let arrivalStay: StayConnection?
+    var departureStay: StayConnection?
+    var arrivalStay: StayConnection?
 }
 
 struct RouteVisit: Identifiable, Codable, Sendable {
+    var visitName: String? = nil
+    var sourceArrivalID: UUID? = nil
+    var sourceDepartureID: UUID?
+    var isConfirmed = false
     let id: PersistentIdentifier
     let date: Date
     let startedAt: Date
@@ -147,6 +156,7 @@ struct RouteVisit: Identifiable, Codable, Sendable {
 struct RoutePlace: Identifiable, Sendable {
     var id: RouteVisit.ID { visits[0].id }
     var coordinate: CLLocationCoordinate2D { visits[0].coordinate }
+    var visitName: String? { visits[0].visitName }
     var mostRecentVisit: RouteVisit { visits[visits.count - 1] }
 
     private(set) var visits: [RouteVisit]
@@ -156,6 +166,7 @@ struct RoutePlace: Identifiable, Sendable {
         for visit in visits.sorted(by: { $0.startedAt < $1.startedAt }) {
             let location = visit.coordinate.location
             let nearest = places.indices.lazy
+                .filter { places[$0].visitName == visit.visitName }
                 .map { (index: $0, distance: places[$0].coordinate.location.distance(from: location)) }
                 .min { $0.distance < $1.distance }
             if let nearest, nearest.distance <= radius {

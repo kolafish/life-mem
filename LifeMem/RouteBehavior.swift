@@ -46,6 +46,8 @@ struct RouteBehavior: Sendable {
         let start: CLLocationCoordinate2D
         let end: CLLocationCoordinate2D
         let mode: TravelMode
+        var startName: String?
+        var endName: String?
         fileprivate(set) var samples: [TravelSample]
 
         var byHour: [HourlyTravel] {
@@ -81,7 +83,8 @@ struct RouteBehavior: Sendable {
         var homeTimes: [RoutinePoint.ID: Date] = [:]
         for journey in summary.journeys {
             for (kind, connection) in [(RoutineKind.departure, journey.departureStay), (.arrival, journey.arrivalStay)] {
-                guard let connection else { continue }
+                let corrected = kind == .departure ? journey.endpoints.startName : journey.endpoints.endName
+                guard corrected == nil, let connection else { continue }
                 let date = calendar.startOfDay(for: connection.time)
                 guard range.contains(date), category(connection.coordinate) == .home else { continue }
                 let key = RoutinePoint.ID(day: date, kind: kind)
@@ -110,7 +113,8 @@ struct RouteBehavior: Sendable {
                                       startingHour: calendar.component(.hour, from: journey.departedAt), duration: journey.duration)
             let nearest = trips.indices.lazy.compactMap { index -> (index: Int, distance: CLLocationDistance)? in
                 let group = trips[index]
-                guard group.pattern.mode == journey.mode else { return nil }
+                guard group.pattern.mode == journey.mode, group.pattern.startName == journey.endpoints.startName,
+                      group.pattern.endName == journey.endpoints.endName else { return nil }
                 let a = startLocation.distance(from: group.start)
                 guard a <= RouteReview.placeRadius else { return nil }
                 let b = endLocation.distance(from: group.end)
@@ -122,7 +126,7 @@ struct RouteBehavior: Sendable {
             } else {
                 let pattern = RoutePattern(
                     id: journey.id, start: journey.endpoints.start, end: journey.endpoints.end,
-                    mode: journey.mode, samples: [sample]
+                    mode: journey.mode, startName: journey.endpoints.startName, endName: journey.endpoints.endName, samples: [sample]
                 )
                 trips.append(PatternGroup(pattern: pattern, start: startLocation, end: endLocation))
             }

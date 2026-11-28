@@ -264,7 +264,7 @@ final class PlaceResolver {
             guard isPrefetchEnabled, names.loadIssue == nil, remaining > 0, !Task.isCancelled,
                   cache == cacheRevision, permission == automaticRevision else { return }
             if let retryAfter, clock.now < retryAfter { return }
-            guard !prefetchedVisits.contains(visit.id), names.name(for: visit.coordinate) == nil,
+            guard visit.visitName == nil, !prefetchedVisits.contains(visit.id), names.name(for: visit.coordinate) == nil,
                   cached(near: visit.coordinate) == nil else { continue }
             await resolveAutomatically(near: visit.coordinate, names: names)
             guard !Task.isCancelled, cache == cacheRevision, permission == automaticRevision else { return }

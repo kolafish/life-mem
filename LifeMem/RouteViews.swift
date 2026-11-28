@@ -25,7 +25,7 @@ struct RouteHistoryView: View {
         VStack(spacing: 0) {
             if !placeResolver.hasSeenAutomaticIntroduction, !placeResolver.isAutomaticEnabled,
                placeNames.loadIssue == nil, let review,
-               review.places.contains(where: { placeResolver.label(near: $0.coordinate, names: placeNames) == nil }) {
+               review.places.contains(where: {  $0.visitName == nil && placeResolver.label(near: $0.coordinate, names: placeNames) == nil }) {
                 automaticIntroduction
             }
             if hasRoutes {
@@ -149,7 +149,7 @@ struct RouteHistoryView: View {
                 }
                 Section {
                     ForEach(review.places) { place in
-                        let name = placeResolver.label(near: place.coordinate, names: placeNames)
+                        let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
                         let visitCount = "\(place.visits.count) 次到访"
                         let lastVisit = "最近 \(place.mostRecentVisit.startedAt.formatted(.dateTime.year().month().day().hour().minute()))"
                         NavigationLink {
@@ -196,7 +196,7 @@ struct RouteHistoryView: View {
     }
 
     private func daySummary(_ day: RouteReviewDay) -> String {
-        let name = day.entries.lazy.compactMap(\.visitCoordinate).compactMap { placeResolver.label(near: $0, names: placeNames) }.first
+        let name = day.stays.lazy.compactMap { $0.visitName ?? placeResolver.label(near: $0.coordinate, names: placeNames) }.first
         return name.map { "\(day.summary) · \($0)" } ?? day.summary
     }
 
@@ -237,8 +237,8 @@ private struct RoutePlaceReviewView: View {
     @State private var namingTarget: PlaceNamingTarget?
 
     var body: some View {
-        let canLookUp = scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
-        let name = placeResolver.label(near: place.coordinate, names: placeNames)
+        let canLookUp = place.visitName == nil && scenePhase == .active && suggestedCategory == nil && placeResolver.isAutomaticEnabled && namingTarget == nil
+        let name = place.visitName ?? placeResolver.label(near: place.coordinate, names: placeNames)
         let mapCoordinate = RouteMapProjection.standard.coordinate(for: place.coordinate)
         let daysByDate = Dictionary(uniqueKeysWithValues: days.map { ($0.date, $0) })
         List {
@@ -298,8 +298,23 @@ private struct RoutePlaceReviewView: View {
     }
 }
 
-private struct RouteDayReviewView: View {
-    let day: RouteReviewDay
+private struct CurrentReviewKey: EnvironmentKey {
+    static let defaultValue: RouteReview? = nil
+}
+
+extension EnvironmentValues {
+    var currentRouteReview: RouteReview? {
+        get { self[CurrentReviewKey.self] }
+        set { self[CurrentReviewKey.self] = newValue }
+    }
+}
+
+struct RouteDayReviewView: View {
+    @Environment(\.currentRouteReview) private var currentReview
+    private let initialDay: RouteReviewDay
+    private var day: RouteReviewDay {
+        currentReview?.days.first { $0.date == initialDay.date } ?? initialDay
+    }
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(RoutePlaceNames.self) private var placeNames
@@ -322,7 +337,7 @@ private struct RouteDayReviewView: View {
     }
 
     init(day: RouteReviewDay, focus: RouteReviewEntry.ID? = nil, allowsAutomaticLookup: Bool = true) {
-        self.day = day
+        self.initialDay = day
         initialFocus = focus
         self.allowsAutomaticLookup = allowsAutomaticLookup
         _selection = State(initialValue: Selection(id: focus))
@@ -387,7 +402,7 @@ private struct RouteDayReviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: canLookUp) {
             guard canLookUp else { return }
-            await placeResolver.resolveAutomatically(near: day.entries.compactMap(\.visitCoordinate), names: placeNames)
+            await placeResolver.resolveAutomatically(near: day.stays.filter { $0.visitName == nil }.map(\.coordinate), names: placeNames)
         }
         .sheet(item: $namingTarget) { target in
             PlaceNamingView(
@@ -409,6 +424,7 @@ struct RouteDetailView: View {
         let days = RouteReview(routes: [route], calendar: calendar).days
         if let day = days.first(where: { $0.date == selectedDate }) ?? days.first {
             RouteDayReviewView(day: day)
+                .environment(\.currentRouteReview, nil)
                 .id(day.id)
                 .toolbar {
                     if days.count > 1 {

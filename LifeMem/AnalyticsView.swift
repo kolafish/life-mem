@@ -290,8 +290,8 @@ struct AnalyticsView: View {
     }
 
     private func patternTitle(_ pattern: RouteBehavior.RoutePattern, index: Int) -> String {
-        let start = resolver.label(near: pattern.start, names: names)
-        let end = resolver.label(near: pattern.end, names: names)
+        let start = pattern.startName ?? resolver.label(near: pattern.start, names: names)
+        let end = pattern.endName ?? resolver.label(near: pattern.end, names: names)
         if start == nil, end == nil { return "路线 \(index + 1) · \(pattern.mode.recordedTitle)" }
         return "\(start ?? "起点") → \(end ?? "终点") · \(pattern.mode.recordedTitle)"
     }
@@ -307,7 +307,7 @@ struct AnalyticsView: View {
             .frame(minHeight: 44)
             ForEach(top) { item in
                 let coordinate = item.place.coordinate
-                let title = resolver.label(near: coordinate, names: names) ?? "停留地点 \(report.placeNumbers[item.id, default: 1])"
+                let title = item.place.visitName ?? resolver.label(near: coordinate, names: names) ?? "停留地点 \(report.placeNumbers[item.id, default: 1])"
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title).font(.subheadline.weight(.medium))
                     GeometryReader { geometry in
