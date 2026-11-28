@@ -40,6 +40,29 @@ final class ReviewUITests: XCTestCase {
         #endif
     }
 
+    func testTodayGroupsNearbyRunsAtHome() {
+        let app = launch(fixture: "home-stay")
+        let groups = app.buttons.matching(identifier: "today-place-stay")
+        let stay = groups.matching(NSPredicate(format: "label CONTAINS %@", "测试之家 · 可能仍在停留")).firstMatch
+        XCTAssertTrue(stay.waitForExistence(timeout: 8), app.debugDescription)
+        let entries = app.buttons.matching(identifier: "today-entry")
+        let collapsed = entries.count
+        stay.tap()
+        XCTAssertTrue(entries.element(boundBy: collapsed).waitForExistence(timeout: 5), app.debugDescription)
+        entries.allElementsBoundByIndex.last?.tap()
+        let done = app.buttons["完成"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(stay.waitForExistence(timeout: 8))
+        let toggle = app.switches["自动记录（试用）"]
+        scrollTo(toggle, in: app)
+        toggle.tap()
+        XCTAssertFalse(stay.exists)
+        XCTAssertTrue(groups.matching(NSPredicate(format: "label CONTAINS %@", "测试之家 · 可能停留")).firstMatch.exists)
+    }
+
     func testSearchPlaceAndRecallVisit() {
         let app = launch(fixture: "day")
         app.tabBars.buttons["回顾"].tap()

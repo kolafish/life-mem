@@ -58,7 +58,13 @@ struct LifeMemApp: App {
             #endif
             let container = try RouteStore.open(directory: Self.storageDirectory)
             #if DEBUG && targetEnvironment(simulator)
-            if shouldSeed { try ReviewTestFixture.seed(context: container.mainContext, names: names, directory: Self.storageDirectory) }
+            if shouldSeed {
+                try ReviewTestFixture.seed(context: container.mainContext, names: names, directory: Self.storageDirectory)
+                if ReviewTestFixture.scenario == "home-stay" {
+                    preferences.set(true, forKey: "automaticRecordingEnabled")
+                    preferences.set(ReviewTestFixture.staySession, forKey: "automaticRecordingSince")
+                }
+            }
             #endif
             let index = RouteSummaryIndex(file: Self.storageDirectory.appending(path: "daily-summary.json"))
             let recorder = RouteRecorder(context: container.mainContext, summaryIndex: index, preferences: preferences)
@@ -95,6 +101,9 @@ private struct RootView: View {
         let tab: Tab
         let day: Date
         let revision: RouteReviewRevision
+        let placesRevision: UUID
+        let activeSession: Date?
+        let latestFinished: Bool?
     }
 
     @Environment(\.calendar) private var calendar
@@ -109,6 +118,7 @@ private struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var historyReader = ArchiveSummaryReader()
     @State private var todayCache = RouteReviewCache()
+    @State private var todayStays: [TodayPlaceStay] = []
     @State private var todayReview: RouteReview?
     @State private var review: RouteReview?
     @State private var reviewCache = RouteReviewCache()
@@ -118,12 +128,15 @@ private struct RootView: View {
 
     var body: some View {
         let midnight = calendar.startOfDay(for: today)
-        let request = Request(tab: selection, day: midnight, revision: RouteReviewRevision(calendar: calendar, routes: routes))
+        let request = Request(tab: selection, day: midnight, revision: RouteReviewRevision(calendar: calendar, routes: routes),
+                              placesRevision: placeNames.snapshot.revision,
+                              activeSession: recorder.automaticEnabled && !recorder.automaticNeedsSettings ? recorder.automaticTrips.sessionStart : nil,
+                              latestFinished: routes.first?.isFinished)
         let prefetchRoutes = recentFinishedRoutesForPrefetch
         let prefetch = prefetchRoutes.isEmpty ? nil : RouteReviewRevision(calendar: calendar, routes: prefetchRoutes)
         TabView(selection: $selection) {
             NavigationStack {
-                RecordView(recorder: recorder, day: todayReview?.days.first { $0.date == midnight }, loading: todayReview == nil && !routes.isEmpty)
+                RecordView(recorder: recorder, day: todayReview?.days.first { $0.date == midnight }, loading: todayReview == nil && !routes.isEmpty, stays: todayStays)
             }
             .tabItem { Label("今天", systemImage: "sun.max") }
             .tag(Tab.record)
@@ -148,7 +161,10 @@ private struct RootView: View {
         .task(id: request) {
             guard !Task.isCancelled else { return }
             if request.tab == .record {
-                todayReview = todayCache.day(routes: routes, containing: midnight, calendar: request.revision.calendar)
+                let timeline = todayCache.today(routes: routes, now: .now, calendar: request.revision.calendar,
+                                                places: placeNames.snapshot, activeSession: request.activeSession)
+                todayReview = timeline.review
+                todayStays = timeline.stays
             }
             if request.tab == .review {
                 review = reviewCache.review(routes: routes, calendar: request.revision.calendar)
@@ -195,8 +211,31 @@ private enum ReviewTestFixture {
     static let scenario = ProcessInfo.processInfo.environment["LIFEMEM_UI_TEST_FIXTURE"]
     static let storageID = ProcessInfo.processInfo.environment["LIFEMEM_UI_TEST_STORAGE_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
 
+    static let staySession = Date.now.addingTimeInterval(-12 * 3600)
+
     @MainActor
     static func seed(context: ModelContext, names: RoutePlaceNames, directory: URL) throws {
+        if scenario == "home-stay" {
+            let start = Date.now.addingTimeInterval(-30 * 60)
+            let home = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+            try names.save("测试之家", for: home)
+            for (offset, from, to) in [(0, 0.002, 0.0), (600, 0.0, 0.0003), (1200, 0.0002, 0.0)] {
+                let route = RecordedRoute(startedAt: start.addingTimeInterval(Double(offset)))
+                route.isAutomatic = true
+                route.isFinished = true
+                if offset > 0 { route.endedAtRest = true; route.automaticSessionStart = staySession }
+                context.insert(route)
+                for (i, x) in [from, to].enumerated() {
+                    let fix = CLLocation(coordinate: .init(latitude: 0, longitude: x), altitude: 0,
+                                         horizontalAccuracy: 5, verticalAccuracy: 5,
+                                         timestamp: route.startedAt.addingTimeInterval(Double(i * 60)))
+                    context.insert(RoutePoint(location: fix, mode: .walking, startsNewSegment: i == 0, route: route))
+                    route.pointCount += 1
+                }
+            }
+            try context.save()
+            return
+        }
         if scenario == "suggestions" || scenario == "prefetch" {
             try seedSuggestions(context: context)
             return

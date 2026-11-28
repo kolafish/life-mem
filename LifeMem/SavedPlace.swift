@@ -51,6 +51,12 @@ struct RoutePlaceSnapshot: Sendable {
         matchingIndex(for: coordinate).flatMap { places[$0].category }
     }
 
+    func savedPlace(near coordinate: CLLocationCoordinate2D) -> (name: String, center: CLLocationCoordinate2D)? {
+        guard let index = matchingIndex(for: coordinate) else { return nil }
+        let place = places[index]
+        return (place.name, place.location.coordinate)
+    }
+
     func hasCategory(_ category: PlaceCategory) -> Bool {
         places.contains { $0.category == category }
     }
