@@ -196,8 +196,7 @@ struct RouteHistoryView: View {
     }
 
     private func daySummary(_ day: RouteReviewDay) -> String {
-        let name = day.stays.lazy.compactMap { $0.visitName ?? placeResolver.label(near: $0.coordinate, names: placeNames) }.first
-        return name.map { "\(day.summary) · \($0)" } ?? day.summary
+        day.placeSequence { placeResolver.label(near: $0, names: placeNames) } ?? day.summary
     }
 
     private struct ReviewModePicker: View {

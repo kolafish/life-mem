@@ -3,6 +3,10 @@ import UIKit
 
 struct RecordView: View {
     let recorder: RouteRecorder
+    let day: RouteReviewDay?
+    let loading: Bool
+    @Environment(RoutePlaceNames.self) private var names
+    @Environment(PlaceResolver.self) private var resolver
     @Environment(\.openURL) private var openURL
     @State private var routeToDiscard: RecordedRoute?
     @State private var discardFailed = false
@@ -33,28 +37,17 @@ struct RecordView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Image(systemName: statusSymbol)
-                        .font(.system(size: 42))
-                        .foregroundStyle(.indigo)
-                        .accessibilityHidden(true)
-                    Text(status)
+                if let day {
+                    Text(day.placeSequence { resolver.label(near: $0, names: names) } ?? "今天的行程")
                         .font(.title2.bold())
-                        .accessibilityAddTraits(.isHeader)
-                    Text(statusDetail)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let route = recorder.activeRoute ?? recorder.automaticTrips.route, !route.isFinished {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 24) { metrics(for: route) }
-                            VStack(alignment: .leading, spacing: 12) { metrics(for: route) }
-                        }
-                        .padding(.top, 5)
-                    }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("today-title")
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(status, systemImage: statusSymbol).font(.headline)
+                    Text(statusDetail).font(.subheadline).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(22)
-                .background(.indigo.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
 
                 VStack(spacing: 10) {
                     if !recorder.automaticEnabled {
@@ -86,6 +79,25 @@ struct RecordView: View {
                     }
                 }
 
+                if let day {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(day.entries) { entry in
+                            NavigationLink {
+                                RouteDayReviewView(day: day, focus: entry.id)
+                            } label: {
+                                let name = day.title(for: entry) { resolver.label(near: $0, names: names) }
+                                ReviewTextRow(title: name, detail: nil, time: clockRange(entry.startedAt, entry.endedAt))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .accessibilityIdentifier("today-entry")
+                        }
+                    }
+                } else if loading {
+                    ProgressView("正在读取今天的行程")
+                } else {
+                    Text("今天还没有行程").foregroundStyle(.secondary)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("自动记录（试用）", isOn: Binding(
                         get: { recorder.automaticEnabled }, set: { recorder.setAutomatic($0) }
@@ -112,7 +124,7 @@ struct RecordView: View {
             }
             .padding(20)
         }
-        .navigationTitle("记录")
+        .navigationTitle("今天")
         .confirmationDialog("丢弃这次记录？", isPresented: Binding(
             get: { routeToDiscard != nil },
             set: { if !$0 { routeToDiscard = nil } }
@@ -170,20 +182,4 @@ struct RecordView: View {
         if recorder.state == .recording { recorder.pause() } else { recorder.start() }
     }
 
-    @ViewBuilder
-    private func metrics(for route: RecordedRoute) -> some View {
-        metric(label: "已记录距离", value: route.formattedDistance)
-        metric(label: "采集点", value: route.pointCount.formatted())
-    }
-
-    private func metric(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value)
-                .font(.title3.weight(.semibold).monospacedDigit())
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
 }

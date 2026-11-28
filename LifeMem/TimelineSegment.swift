@@ -51,6 +51,37 @@ struct RouteReviewDay: Identifiable {
     let date: Date
     let entries: [RouteReviewEntry]
 
+    func title(for entry: RouteReviewEntry, named: (CLLocationCoordinate2D) -> String?) -> String {
+        if let stay = entry.stay {
+            let name = stay.visitName ?? named(stay.coordinate)
+            if stay.isCandidate == true { return (name ?? "附近地点") + " · 可能停留" }
+            return name ?? "未命名停留"
+        }
+        if let ends = entry.endpoints {
+            let from = ends.startName ?? named(ends.start), to = ends.endName ?? named(ends.end)
+            if from != nil || to != nil { return "\(from ?? "起点") → \(to ?? "终点")" }
+        }
+        let modes = Set(entry.moves.map(\.mode))
+        if modes.count == 1, let mode = modes.first { return mode.recordedTitle }
+        return modes.isEmpty ? "记录片段" : "混合行程"
+    }
+
+    func placeSequence(named: (CLLocationCoordinate2D) -> String?) -> String? {
+        var result: [String] = []
+        func append(_ name: String?) {
+            if let name, name != result.last { result.append(name) }
+        }
+        for entry in entries {
+            if let stay = entry.stay, stay.isCandidate != true {
+                append(stay.visitName ?? named(stay.coordinate))
+            } else if let ends = entry.endpoints {
+                append(ends.startName ?? named(ends.start))
+                append(ends.endName ?? named(ends.end))
+            }
+        }
+        return result.isEmpty ? nil : result.joined(separator: " → ")
+    }
+
     var timeline: [TimelineSegment] { entries.flatMap(\.timeline) }
     var stays: [StayEvent] { entries.compactMap(\.stay).filter { $0.isCandidate != true } }
     var moves: [MoveEvent] { entries.flatMap(\.moves) }

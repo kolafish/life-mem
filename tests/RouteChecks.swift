@@ -1244,6 +1244,14 @@ struct RouteChecks {
         b.automaticSessionStart = a.automaticSessionStart
         b.previousAutomaticRouteID = nil
         precondition(candidates().isEmpty)
+        if let movement = confirmed.days.flatMap(\.entries).first(where: { $0.kind == .trip }),
+           let stay = confirmed.days.flatMap(\.entries).first(where: { $0.stay != nil }) {
+            var separate = movement
+            separate.endpoints?.startName = "学校"
+            separate.endpoints?.endName = "车站"
+            let sequence = RouteReviewDay(date: midnight, entries: [stay, separate]).placeSequence { _ in nil }
+            precondition(sequence == "测试书店 → 学校 → 车站")
+        } else { preconditionFailure("Missing synthetic movement or stop") }
         let visitStart = midnight.addingTimeInterval(5000)
         let observed = RecordedRoute(startedAt: visitStart)
         context.insert(observed)
